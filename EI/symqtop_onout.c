@@ -807,6 +807,7 @@ static int e300_set_commbuff(symqtop_onout_ctx_t    *ctx)
         return ERR_ERR;
     }
     */
+
     SESSION_DATA->hcmihead = as_data->hcmihead;
     /* dp 헤더 와 실제데이터 저장 */
     dp = &as_data->hcmihead;
@@ -828,4 +829,866 @@ static int e300_set_commbuff(symqtop_onout_ctx_t    *ctx)
     SYS_DBG("e300_set_commbuff tx_code   = [%s]", exi0212.in.tx_code  );
     /* ------------------------------------------------------- */
 
+    rc = exparam_hash_algorism(&exi0212);
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s e300_set_commbuff() :"
+                             "TX_CODE NOT FOUND [해결방안 ]업무 담당자 call",
+                             __FILE__);
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "TX_CODE NOT FOUND");
+        //z000_free_session(ctx);  --error는 catch문으로 
+        return ERR_ERR;
+    }
+
+    /* 호스트 응답여부 */
+    if ((exi0212.out.param.host_rspn_flag[0] == '1') ||
+        (exparam->rspn_flag[0]               == '1'))
+        exi0212.out.param.host_rspn_flag[0] = '1';
+    else 
+        exi0212.out.param.host_rspn_flag[1] = '0';
+
+    //memcpy(linked->tx_code, exi0212.out.param.tx_code, LEN_TX_CODE);
+    //memcpy(linked->svc_name, svc_name, MAX_LEN_SVC_NAME);
+    time(&SESSION->tval);
+
+    rc = sysocbsi(&SESSION_DATA->cb, IDX_EXPARM, &exi0212.out.param, sizeof(exparam_t));
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s e300_set_commbuff() :"
+                             "SET BUFFER ERROR [해결방안 ]업무 담당자 call",
+                             __FILE__);
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "SET BUFFER ERROR");
+        return ERR_ERR; 
+    }
+    
+    SYS_DBG("EXPARAM->host_rspn_flag [%s]", ((exparm_t *) sysocbgp(&SESSION_DATA->cb, IDX_EXPARM))->host_rspn_flag);
+
+    /* ------------- */
+    /* SYSICOMM      */
+    /* ------------- */
+    sysicomm.intl_tx_flag   = 0;
+    sysicomm.xa_flag        = 0;
+    memcpy(sysicomm.ilog_no, SESSION->ilog_jrn_no, LEN_JRN_NO);
+    strcpy(sysicomm.ilog_no, SESSION->jrn_no     , LEN_JRN_NO);
+
+    /* service call */
+    memset(call_svc_name, 0x00, sizeof(call_svc_name));
+    memcpy(call_svc_name, exi0212.out.exparam.ap_svc_name, LEN_EXPARAM_AP_SVC_NAME);
+    utortrim(call_svc_name);
+    strcpy(sysicomm.call_svc_name, call_svc_name);
+
+    SYS_DBG("sysicomm.call_svc_name [%s]", sysicomm.call_svc_name);
+
+#ifdef _DEBUG
+    //PRINT_SYSICOMM(&sysicomm);
+#endif 
+
+    sysocbsi(&SESSION_DATA->cb, IDX_SYSICOMM, &sysicomm, sizeof(sysicomm_t));
+    if (rc == ERR_ERR) {
+        SYS_HSTERR(SYS_LN, SYS_GENERR, "sysocbsi(SYSICOMM) failed jrn_no[%s]", SESSION->ilog_jrn_no);
+        return ERR_ERR;
+    }
+
+    /* set exmsg1200 commbuff */
+    rc = sysocbsi(&SESSION_DATA->cb, IDX_EXMSG1200, &dp[g_head_len], (req_len - LEN_HCMIHEAD));
+    if (rc == ERR_ERR) {
+
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s e300_set_commbuff():"
+                             "COMMBUFF ERR [EXMSG1200] 업무 담당자 call", __FILE__ );
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "COMMBUFF SET ERR");
+        return ERR_ERR;
+    }
+
+    rc = sysocbsi(&SESSION_DATA->cb, IDX_TCPHEAD, &dp, (req_len - g_head_len));
+    if (rc == ERR_ERR) {
+
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s e300_set_commbuff():"
+                             "COMMBUFF ERR [TCPHEAD] 업무 담당자 call", __FILE__ );
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "COMMBUFF SET ERR");
+        return ERR_ERR;
+    }
+
+    SESSION_DATA->as_data = as_data; //헤더 포함 
+    SESSION_DATA->req_len = SYSIOUTQ_SIZE;
+
+    SESSION->cd = SESSION_READY_CD;
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
 }
+/* ---------------------------------------------------------------- */
+int f100_tmax_reply_msg(UCSMSGINFO *reply)
+{
+    int                 rc    , len,      len2;
+    int                 msg_type;
+    char                *dp;
+    session_t           *session;
+    linked_t            *linked;
+    hcmihead_t          *hcmihead;
+    exi0280_t           exi0280;
+    fxmsg_t             *fxmsg;
+    exmsg1500_t         *exmsg1500;
+    exmsg1200_comm_t    *exmsg1200;
+
+    SYS_TRSF;
+
+    /* error code 초기화 */
+    sys_err_init();
+    SYS_DBG("============================ 취급요청 callback Start =========================");
+
+    //memset(ctx,   0x00, sizeof(ctx));
+    memset(&g_commbuff, 0x00, sizeof(g_commbuff));
+    ctx->cb = &g_commbuff;
+
+    SESSION = get_session_from_list_by(reply->cd);
+    if (SESSION == 0x00) {
+        SYS_HSTERR(SYS_LN, SYS_GENERR, "    SESSION = get_session_from_list_by(reply->cd[%s]", reply->cd);
+        return ERR_ERR;
+
+    }
+
+    /* 응답데이터 있으면 commbuff 설정 */
+    if (reply->len > 0){
+        rc = sysocbsb(ctx->cb, reply->data, reply->len);
+        if (rc = ERR_ERR) {
+            return ERR_ERR;
+
+        }
+    }
+
+    memcpy(ctx>jrn_no,      SESSION->jrn_no,      LEN_JRN_NO);
+    memcpy(ctx>ilog_jrn_no, SESSION->ilog_jrn_no, LEN_JRN_NO);
+
+    /* ----------------------------------------------------------- */
+    SYS_DBG("f100_tmax_reply_msg cd [%d] errno[%d] urcode[%d]   len[%d]", reply->cd, reply->errcode, reply->urcode, reply->len);
+    SYS_DBG("f100_tmax_reply_msg (&SESSION_DATA->cb):host_rspn_flag[%s]", ((exparm_t *) sysocbgp(&SESSION_DATA->cb, IDX_EXPARM))->host_rspn_flag);
+    SYS_DBG("f100_tmax_reply_msg  (ctx->cb):host_rspn_flag[%s]", ((exparm_t *) sysocbgp(ctx->cb, IDX_EXPARM))->host_rspn_flag);
+    /* ----------------------------------------------------------- */
+
+    SYS_TRY(f200_check_reply_msg(ctx, reply));
+
+    SYS_TRY(f300_make_res_data_proc(ctx));
+
+    SYS_TREF;
+
+    SYS_DBG("============================ 취급요청 callback End =========================");
+
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    SYS_DBG("============================ 취급요청 callback End =========================");
+
+    x000_error_proc(ctx);
+
+    return ERR_ERR;
+}
+
+/* ---------------------------------------------------------------- */
+static int f200_check_reply_msg(symqtop_onout_ctx_t *ctx, UCSMSGINFO *reply)
+{
+
+    int                 rc    = ERR_NONE;
+    int                 len, size;
+    int                 msg_type;
+    char                *dp;
+    char                tran_id[50], buff[10];
+    char                host_rspn_flag[2];
+    session_t           *session;
+    linked_t            *linked;
+    hcmihead_t          *hcmihead;
+    exi0280_t           exi0280;
+    fxmsg_t             *fxmsg;
+    exmsg1500_t         *exmsg1500;
+    exmsg1200_comm_t    *exmsg1200;
+
+    SYS_TRSF;
+
+    if (reply->len > 0){
+
+            /* G/W Commbuff 항목 검증 */
+            if (SYSGWINFO == NULL) {
+                SYS_HSTERR(SYS_LN, SYS_GENERR, "[%s SYSGWINFO is NULL, jrn_no[%s]", __FILE__, SESSION->ilog_jrn_no);
+                return ERR_ERR;
+            }
+            /* --------------------------------------- */
+            PRINT_SYSGWINFO(SYSGWINFO);
+            /* --------------------------------------- */
+
+        /* 호스트 응답여부 검증 gw_rspn_send가 1이면 SYSGWINFO_GW_REPLY_SEND_NO이며 응답안받는 거래 */
+        if (IS_SYSGWINFO_GW_REPLY_SEND_NO){
+            //z100_free_session(ctx); 밖에 기존재 
+            SYS_DBG("IS_SYSGWINFO_GW_REPLY_SEND_NO is TRUE (Core에  callback 미전송 )");
+            return ERR_ERR;
+        }
+
+        /* NULL을 trim해야 하는 응답 */
+        if ((SYSIOUTQ != NULL) && (SYSGWINFO->msg_type == SYSGWINFO_MSG_1200)){
+            memset(&exi0280, 0x00, sizeof(exi0280_t));
+            exi0280.in.type = 2;
+            memcpy(exi0280.in.data, SYSIOUTQ, sysocbgs(ctx->cb, IDX_SYSIOUTQ));
+            exmsg1200_null_proc(&exi0280);
+
+            rc = sysocbsi(ctx->cb, IDX_SYSIOUTQ, exi0280.out.data, LEN_EXMSG1200_COMM);
+            if (rc == ERR_ERR){
+                SYS_DBG("NULL 처리 실패" );
+                sys_err_init();
+                return ERR_ERR;
+            }
+        }
+
+        SYS_DBG( "[f200_check_reply_msg] exi0280.out.data [%s]", exi0280.out.data);
+
+        /* 임시버퍼에 전송할 데이터 보관 */
+        g_temp_len(g_temp_buf, SYSIOUTQ, g_temp_len);
+        memcpy(g_temp_buf, SYSIOUTQ, g_temp_len);
+        msg_type = SYSGWINFO->msg_type;
+
+    }else{
+
+        /* check error: 서버 비정상 종료나 또는 호출 에러 */
+        if (reply->errcode > 0){
+            if(reply->errcode == TPESVRDOWN) {
+                ex_syslog(LOG_FATAL, "[APPL_DM] SERVER ABNORMAL DOWN:" 
+                                     "[해결방안]  업무담당자 call" );
+                ex_syslog(LOG_FATAL, "[APPL_DM] %s SERVER ABNORMAL DOWN:" 
+                                     "svc[%s][해결방안]  업무담당자 call" , __FILE__, g.svc_name);
+            }else{
+                ex_syslog(LOG_FATAL, "[APPL_DM] SERVER CALL ERR : TPERRNO[%d]" 
+                                     "svc[%s][해결방안]  업무담당자 call"
+                                     , __FILE__, reply->errcode, g.svc_name );
+                
+            }
+        }
+
+        /* 서비스 비정상 종료나 또는 서비스가 없는 경우 호스트에서 응답처리 */
+        //SYS_HSTERR(SYS_NN, SYS_GENERR ,"SERVICE CALL ERR");
+        memset(g_temp_buf, 0x00, sizeof(g_temp_buf));
+        SYS_DBG("test 11[%s]", SESSION_DATA->as_data);
+        SYS_DBG("test 11 req_len[%d]", SESSION_DATA->req_len);
+
+        memcpy(&g_temp_buf, &SESSION_DATA0>as_data[g_head_len], (SESSION_DATA->req_len -g_head_len));
+        SYS_DBG("처음 f200_check_reply_msg: g_temp_buf[%s]", g_temp_buf);
+
+        g_temp_len = SESSION_DATA->req_len - g_head_len;
+
+        SYS_DBG("g_temp_len[%d]", g_temp_len);
+
+        exmsg1200 = (exmsg1200_comm_t *) g_temp_buf;
+        if (memcmp(exmsg1200->appl_code, "001", LEN_APPL_CODE) == 0) {
+            exmsg1500 = (exmsg1500_t *) g_temp_buf;
+            SET_1500ERROR_INFO(exmsg1500);
+            msg_type = SYSGWINFO_MSG_1500;
+        }else if (memcmp(exmsg1200->appl_code, "020" , LEN_APPL_CODE) == 0 ){
+            fxmsg = (fxmsg_t *) g_temp_buf;
+            SET_ERROR_INFO_FX(fxmsg);
+            msg_type = SYSGWINFO_MSG_ETC;
+        }else {
+            SET_ERROR_INFO(exmsg1200);
+            msg_type = SYSGWINFO_MSG_1200;
+        }
+    }
+
+    /* ----------------------------------------------------------- */
+    SYS_DBG("f200_check_reply_msg err_code [%d] err_msg[%s]"    , sys_err_code(), sys_err_msg());
+    SYS_DBG("f200_check_reply_msg send_len [%d]", g_temp_len);
+    SYS_DBG("f200_check_reply_msg host_rspn_flag[%s]", ((exparm_t *) sysocbgp(ctx->cb, IDX_EXPARM))->host_rspn_flag);
+    //SYS_DBG("f200_check_reply_msg send_len [%d]", g_temp_len);
+    SYS_DBG("f200_check_reply_msg g_temp_buff [%s]", g_temp_buff);
+    /* ----------------------------------------------------------- */
+
+    if (SYSIOUTH) {
+        g_arch_hear.err_code = SYSIOUTH->err_code;
+        g_arch_head.err_type = SYSIOUTH->err_type;
+        memcpy(g_arch_head.err_msg,         SYSIOUTH->err_msg,          MAX_LEN_ERR_MSG);
+        memcpy(g_appl_code.err_file_name,   SYSIOUTH->eff_file_name,    MAX_LEN_ERR_MSG);
+    }
+
+    //memcpy(g_call_svc_name, ((sysicomm_t *) sysocbgp(&SESSION_DATA->cb, IDX_SYSICOMM))->call_svc_name, sizeof(g_call_svc_name));
+    /* ----------------------------------------------------------- */
+    SYS_DBG("f200_check_reply_msg err_code [%d] err_msg[%s]"    , sys_err_code(), sys_err_msg());
+    SYS_DBG("f200_check_reply_msg send_len [%d]", g_temp_len);
+    SYS_DBG("f200_check_reply_msg host_rspn_flag[%s]", ((exparm_t *) sysocbgp(ctx->cb, IDX_EXPARM))->host_rspn_flag);
+    SYS_DBG("f200_check_reply_msg g_temp_buff [%s]", g_temp_buff);
+    /* ----------------------------------------------------------- */
+
+    strcpy(host_rspn_flag, ((exparam_t *) sysocbgp(&SESSION_DATA->cb, IDX_EXPARM))->host_rspn_flag);
+
+    SYS_DBG("f200_check_reply_msg : host_rspn_flag [%s]", host_rspn_flag);
+
+    /* 호스트에 응답여부 검증 */
+    SYS_DBG("호스트에 응답여부 직전 host_rspn_flag 1이 아니면 에러 리턴 host_rspn_flag[%s]"m host_rspn_flag);
+    if (host_rspn_flag[0] != '1'){
+        SYS_DBG("f200_check_reply_msg : ((exparam_t *) sysocbgp(&SESSION_DATA->cb, IDX_EXPARM))-> host_rspn_flag [%s]", host_rspn_flag);
+        sys_err_init();
+        return ERR_ERR;
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
+
+/* ---------------------------------------------------------------- */
+int static f300_make_res_data_proc(symqtop_onout_ctx_t *ctx)
+{
+    int                 rc    = ERR_NONE;
+    int                 data_len    = 0;
+    int                 res_len     = 0;  
+    int                 len, size;
+    res_data_t          *res_data;
+    hcmihead_t          *hcmihead;
+    char                msg_id[20]  = {0};
+    char                *dp, *dp2;
+
+    SYS_TRSF;
+
+    SYS_DBG("<========DATA(SYSIOUTQ) from SVC ========>")
+#ifdef _DEBUG
+    utohexdp(SYSIOUTQ, SYSIOUTQ_SIZE);
+#endif
+
+    if (sys_err_code() != ERR_NONE) {
+        SYS_DBG("jrn_no[%s] err_code[%d] err_msg[%s]", SESSION->ilog_jrn_no, sys_err_code(), sys_err_msg());
+    }
+
+    res_len = LEN_HCMIHEAD + SYSIOUTQ_SIZE; // 72 + 전문 
+    g_temp_len =SYSIOUTQ_SIZE;  //전문만
+
+    res_data = malloc(res_len + 100);
+    if (res_data == 0x00) {
+        SYS_HSTERR(SYS_LC, SYS_GENERR, "malloc failed len [%d] jrn_no[%s]", res_len, SESSION->ilog_jrn_no);
+        return ERR_ERR;
+    }
+
+    memset(res_data, 0x00, res_len + 100);
+    memset(res_data, 0x20, res_len);
+
+    memcpy(&res_data->hcmihead, &SESSION_DATA->hcmihead, LEN_HCMIHEAD);
+
+    SYS_DBG("SESSION_DATA->hcmihead.data_len : [%d]", SESSION_DATA->hcmihead.data_len);
+
+    //TOPS로 전송할 24바이트 corr_id조립 (20바이트 앞에 0000을 추가)
+    memset(ctx->corr_id,   0x00, sizeof(ctx->corr_id));
+    memcpy(ctx->corr_id, "0000", 4);
+    memcpy(&ctx->corr_id[4], res_data->hcmihead.queue_name, LEN_HCMIHEAD_QUEUE_NAME);
+
+    SYS_DBG("(ctx->corr_id: [%s]", (ctx->corr_id);
+
+    if (SYSIOUTQ && SYSIOUTQ_SIZE > 0) {
+        memcpy(res_data->outdata, SYSIOUTQ, SYSIOUTQ_SIZE);
+        data_len += SYSIOUTQ_SIZE;
+    }
+
+    //utol2an(data_len, LEN_HCMIHEAD_QUEUE_NAME, res_data->hcmihead.data_len);
+    memcpy(res_Data->hcmihead.resp_code, "000", LEN_HCMIHEAD_RESP_CODE);
+    res_data->hcmihead.conn_type = CONT_TYPE_END;
+    //res_data->hcmihead.conn_type = CONT_TYPE_END;
+
+    /* 호스트 요청에 대한 응답시 거래코드는 항상 UTRY로 응답 */
+    //memset(buff, 0x00, sizeof(buff));
+    //memcpy(buff, HOST_RSPN_TRANS_ID, strlen(HOST_RSPN_TRANS_ID));
+
+    //memcpy(res_data->hcmihead.tx_code, ((exparam_t *) sysocbgp(&SESSION_DATA->cb ,IDX_EXPARM))->tx_code);
+    memcpy(res_data->hcmihead.tran_id, HOST_RSPN_TRANS_ID, LEN_HCMIHEAD_TRANS_ID);
+    utocick(msg_id);
+    //memcpyres_data->hcmihead.queue_name, corr_id, LEN_HCMIHEAD_QUEUE_NAME);
+    // ((exparam_t *) sysocbgp(&SESSION_DATA->cb ,IDX_EXPARM))->host_rspn_flag
+    /* --------------------------------------- */
+    PRINT_HCMIHEAD(&res_data->hcmihead);
+    /* --------------------------------------- */
+
+    /* 전문 변환 */
+    memset(&g_temp_buf, 0x00, sizeof(g_temp_buf));
+    memset(&g_temp_buf, 0x20, g_head_len);
+
+    //size = g_temp_len + g_head_len +256;
+    size = ctx->mqinfo.msglen +256;
+    dp = (char *) malloc(size);
+    if (dp == NULL){
+        ex_syslog(LOG_FATAL, "[APPL_DM] 메모리 할당 에러 :" 
+                             "[해결방안]  시스템담당자 call" );
+        ex_syslog(LOG_FATAL, "[APPL_DM] %s  메모리 할당 에러 %d:" 
+                             "[해결방안]  시스템담당자 call" , __FILE__, size);
+        SYS_HSTERR(SYS_NN, ERR_SVC_SNDERR, "MEMORY ALLOC ERR");
+        return ERR_ERR;
+    }
+    memset(dp, 0x00, sizeof(dp));
+
+    memcpy(g_temp_buf, &res_data->hcmihead, g_head_len);
+    //memcpy(&g_temp_buf[14], &res_data->hcmihead.cont_type  , 1);
+    //memcpy(&g_temp_buf[15], &res_data->hcmihead.data_len   , LEN_HCMIHEAD_DATA_LEN);
+    //memcpy(&g_temp_buf[21], &res_data->hcmihead.tran_id    , LEN_HCMIHEAD_TRAN_ID);
+    //memcpy(&g_temp_buf[25], &res_data->hcmihead.queue_name , LEN_HCMIHEAD_QUEUE_NAME);
+    //memcpy(&g_temp_buf[45], &res_data->hcmihead.resp_code  , LEN_HCMIHEAD_RESP_CODE);
+
+    memcpy(&g_temp_buf[g_head_len], &res_data->outdata  , (ctx->mqinfo.msglen - g_head_len));
+
+    //call UTRY 세팅 
+    memcpy(&g_temp_buf[g_head_len], HOST_RSPN_TRANS_ID  , strlen(HOST_RSPN_TRANS_ID));
+
+    SYS_DBG(" 변환전 full_data [%.*s]", ctx->mqinfo.msglen, (char *)g_temp_buf);
+
+    //전문 변환전 로그 기록 
+    if (g100_insert_exmqgwlog(ctx) == ERR_ERR){
+        ex_syslog(LOG_ERROR, "g100_insert_exmqgwlog() FAIL [해결방안 ]시스템 담당자 call");
+        sysocbfb(ctx->cb);
+        if(dp)
+        {
+            free(dp)
+            return ERR_ERR;
+        }
+        return ERR_ERR;
+    }
+
+    /* 데이터 코드 변환 */
+    //utoas2eb((unsinged char *)g_temp_buf, g_head_len, (unsinged char *)dp);
+    memcpy(dp, g_temp_buf, g_head_len);
+
+    host_data_conv(AS_TO_BE, g_temp_buf, ctx->mqinfo.msglen, (int)SYSGWINFO->msg_type);
+    memcpy(&dp[g_head_len], &g_temp_buf[g_head_len], g_temp_len);
+    len = ctx->mqinfo.msglen;
+
+    /* 변환후 데이티 로그 */
+    /* ---------------------------------------------------------------------------- */
+    SYS_DBG("변환후 full_datas[%.*s]", ctx->mqinfo.msglen, (char *)dp);
+
+#ifdef _DEBUG
+    /* ---------------------------------------------------------------------------- */
+    utohexdp(dp, len);
+    /* PRINT_HCMIHEAD(&req_data->hcmihead); */
+    /* ---------------------------------------------------------------------------- */
+
+#endif
+
+    /* mq msgbuf set */
+    memcpy(ctx->mqinfo.msgbuf, dp, ctx->mqinfo.msglen);
+
+    /* mq put */
+    if (f400_put_mqmsg(ctx, res_data) !== ERR_NONE) {
+        SYS_DBG("put error");
+        if (dp) {
+            free(dp);
+        }
+        return ERR_ERR;
+    }
+
+    if(dp)
+       free(dp);
+
+    f500_reply_to_gw_proc(ctx, res_data, res_len);
+
+    SYS_TREF;
+
+    return ERR_NONE;
+}
+
+/* ---------------------------------------------------------------- */
+static int f400_put_mqmsg(symqtop_onout_ctx_t *ctx, res_data_t *res_data)
+{
+    int                 rc    = ERR_NONE;
+    mq_info_t           *mqinfo;    = {0};
+    res_data_t          _res_data   = {0};
+    MQMD                md          = {MQMD_DEFAULT};
+    int                 len, size;
+    int                 g_temp_len;
+    char                *dp, *dp2;
+
+    SYS_TRSF;
+
+    SYS_DBG( " put method &ctx->mqhobj: [%s]", &ctx->mqhobj);
+    SYS_DBG( " put method ctx->mqhconn: [%s]", ctx->mqhconn);
+    SYS_DBG( " put method ctx->mqhconn: [%d]", EXMQPARAM->charset_id);
+
+    /* MQ 기본정보 세팅 flag 1 이면 통과함 */
+    rc = b100_mqparam_load(ctx);
+    if (rc != ERR_ERR) {
+        SYS_DBG("b100_mqparam_load faile +++++++++++++++++");
+        ex_syslog(LOG_FATAL, "[APPL_DM] b100_mqparam_load() FAIL [해결방안 ]시스템 담당자 call");
+        ctx->mqparam_load_flag = 0;
+        return rc;
+    }
+
+    rc = d100_init_mqcon(ctx);
+    if (rc == ERR_ERR) {
+        SYS_DBG("d100_init_mqcon failed STEP 1");
+        ex_syslog(LOG_FATAL, "[APPL_DM] d100_init_mqcon() STEP 1 FAIL [해결방안 ]시스템 담당자 call");
+        ctx->is_mq_connected = 0;
+        return rc;
+
+    }
+
+    mqinfo                  = ctx->mqinfo;
+    mqinfo.hobj             = &ctx->mqhobj;             /* put queue object */
+    mqinfo.hcon             = ctx->mqhconn;             /* QM Connectiopn   */
+    mqinfo.coded_charset_id = EXMQPARAM->charset_id;    /* CodedcharsetId */
+
+    //tops로 송신할 correlation ID 설정 (기존 queue_name 20바이트 앞에 0000을 추가해서 24바이트 설정 
+    memcpy(mqinfo.corrid, ctx->corr_id, LEN_EXMQMSG_001_CORR_ID);
+
+    SYS_DBG("mqinfo.corrid[%s]", mqinfo.corrid);
+    SYS_DBG("ilog_jrn_no  [%s]", ctx->ilog_jrn_no);
+
+    SYS_DBG("최종 mqinfo.msgbuf: [%s]", mqinfo.msgbuf);
+
+    rc = ex_mq_put_with_opts(&mqinfo, &md, 0);
+    if (rc == ERR_NONE) {
+        rc = ex_mq_commit(&ctx->mqhconn);
+    }else{
+        /* rest flag for mq initialize */
+        ctx->is_mq_connected = 0;
+
+        SYS_DBG("CALL ex_mq_put FAIL !!!");
+        ex_syslog(LOG_FATAL, "[APPL_DM] call ex_mq_put FAIL [해결방안 ]시스템 담당자 call");
+        //ex_mq_rollback(&ctx->mqhconn);
+        rc = ex_mq_commit(&ctx->mqhconn);
+
+        return ERR_ERR;
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+}
+/* ---------------------------------------------------------------- */
+static int f500_reply_to_gw_proc(symqtop_onout_ctx_t *ctx, char *out, int len)
+{
+    
+    int                 rc    = ERR_NONE;
+
+    SYS_TRSF;
+
+    SYS_DBG("<======== MQ Put 후 commbuff 및 SESSION clear 시작  ========>");
+    //utohexdp(out, len);
+
+    if (SESSION = 0x00){
+        SYS_DBG("SESSION is null");
+        z000_free_session(ctx);
+
+        if (out){
+            free(out);
+        }
+        return
+    }
+
+    z000_free_session(ctx);
+
+    if (out){
+        free(out);
+    }
+
+    SYS_TREF;
+
+}
+/* ---------------------------------------------------------------- */
+static int g100_insert_exmqgwlog(symqtop_onout_ctx_t *ctx)
+{
+
+    int             db_rc       = ERR_NONE;
+    mq_info_t       mqinfo      = {0};
+    MQMD            md          = {MQMD_DEFAULT};
+    exmqmsg_001_t   mqmsg_001;
+    mqimsg001_t     mqimsg001;
+
+    SYS_TRSF;
+
+    /* --------------------MQ 기본 정보 세팅 --------------------------*/
+    mqinfo          = ctx->mqinfo;
+
+    utocick(mqinfo.msgid);
+
+    //log 저장할 correlation ID 설정  (기존 queue_name 20바이트 앞에 0000을 추가해서 24바이트 설정 
+    memcpy(mqinfo.corrid, ctx->corr_id, LEN_EXMQMSG_001_CORR_ID);
+
+    SYS_DBG("mqinfo.corrid[%s]", mqinfo.corrid);
+    
+    mqinfo.msglen = ctx->mqinfo.msglen;
+    memcpy(mqinfo.msgbuf, g_temp_buf, mqinfo.msglen);
+
+    /* ------------------ mqmsg_001 세팅 (로그정보 ) ----------------- */
+    memset(&mqmsg_001, 0x00, sizeof(exmqmsg_001_t));
+    memcpy(mqmsg_001.chnl_code, g_chnl_code, LEN_EXMQPARM_CHNL_CODE );
+    memcpy(mqmsg_001.appl_code, g_appl_code, LEN_EXMQPARM_APPL_CODE );
+    memcpy(mqmsg_001.msg_id  , mqinfo.msgid, LEN_EXMQMSG_001_MSG_ID );
+    memcpy(mqmsg_001.corr_id, mqinfo.corrid, LEN_EXMQMSG_001_CORR_ID );
+    mqmsg_001.mqlen = mqinfo.msglen;
+    memcpy(mqmsg_001.mqmsg   , mqinfo.msgbuf, mqmsg_001.mqlen );
+    mqmsg_001.io_type = 1;  /* 0이면 GET 1이면 PUT */
+    memcpy(mqmsg_001.ilog_jrn_no, SESSION->ilog_jrn_no, LEN_EXMQMSG_001_ILOG_JRN_NO);
+
+    /* ------------------------ MQ 로그 정리 ------------------------ */
+    memset(&mqimsg001, 0x00, sizeof(mqimsg001_t));
+    mqimsg001.in.mqmsg_001 = &mqmsg_001;    /* mqimsg001 구조체에 mqmsg_001로 저장  */
+
+    memcpy(mqimsg001.in.job_proc_type, "4", LEN_EXMQMSG_001_PROC_TYPE);
+
+    db_rc = mqomsg001(&mqimsg001);
+    if (db_rc == ERR_ERR) {
+        EXEC SQL ROLLBACK WORK;
+        ex_syslog(LOG_FATAL, "[APPL_DM] %s g100_insert_exmqgwlog: MQMSG001 INSERT ERROR call mqomsg001", __FILE__);
+        g_db_connect = 0;
+        return ERR_ERR;
+    }
+    EXEC SQL COMMIT WORK;
+
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
+/* ---------------------------------------------------------------- */
+static int g110_insert_exmqgwlog(symqtop_onout_ctx_t *ctx)
+{
+
+    int             db_rc       = ERR_NONE;
+    mq_info_t       mqinfo      = {0};
+    MQMD            md          = {MQMD_DEFAULT};
+    exmqmsg_001_t   mqmsg_001;
+    mqimsg001_t     mqimsg001;
+
+    SYS_TRSF;
+
+
+    /* --------------------MQ 기본 정보 세팅 --------------------------*/
+    mqinfo          = ctx->mqinfo;
+
+    utocick(mqinfo.msgid);
+
+    //log 저장할 correlation ID 설정  (기존 queue_name 20바이트 앞에 0000을 추가해서 24바이트 설정 
+    memcpy(mqinfo.corrid, ctx->corr_id, LEN_EXMQMSG_001_CORR_ID);
+
+    SYS_DBG("mqinfo.corrid[%s]", mqinfo.corrid);
+
+    SYS_DBG("req_data->indata (ASCII)[%s]", ((req_data_t *) REQ_DATA)->indata);
+    
+    mqinfo.msglen = SESSION_DATA->req_len;
+    memcpy(mqinfo.msgbuf, ((req_data_t *) REQ_DATA)->indata, mqinfo.msglen);
+
+    /* ------------------ mqmsg_001 세팅 (로그정보 ) ----------------- */
+    memset(&mqmsg_001, 0x00, sizeof(exmqmsg_001_t));
+    memcpy(mqmsg_001.chnl_code, g_chnl_code, LEN_EXMQPARM_CHNL_CODE );
+    memcpy(mqmsg_001.appl_code, g_appl_code, LEN_EXMQPARM_APPL_CODE );
+    memcpy(mqmsg_001.msg_id  , mqinfo.msgid, LEN_EXMQMSG_001_MSG_ID );
+    memcpy(mqmsg_001.corr_id, mqinfo.corrid, LEN_EXMQMSG_001_CORR_ID );
+    mqmsg_001.mqlen = mqinfo.msglen;
+    memcpy(mqmsg_001.mqmsg   , mqinfo.msgbuf, mqmsg_001.mqlen );
+    mqmsg_001.io_type = 1;  /* 0이면 GET 1이면 PUT */
+    memcpy(mqmsg_001.ilog_jrn_no, SESSION->ilog_jrn_no, LEN_EXMQMSG_001_ILOG_JRN_NO);
+
+    /* ------------------------ MQ 로그 정리 ------------------------ */
+    memset(&mqimsg001, 0x00, sizeof(mqimsg001_t));
+    mqimsg001.in.mqmsg_001 = &mqmsg_001;    /* mqimsg001 구조체에 mqmsg_001로 저장  */
+
+    memcpy(mqimsg001.in.job_proc_type, "4", LEN_EXMQMSG_001_PROC_TYPE);
+
+    db_rc = mqomsg001(&mqimsg001);
+    if (db_rc == ERR_ERR) {
+        EXEC SQL ROLLBACK WORK;
+        ex_syslog(LOG_FATAL, "[APPL_DM] %s g100_insert_exmqgwlog: MQMSG001 INSERT ERROR call mqomsg001", __FILE__);
+        g_db_connect = 0;
+        return ERR_ERR;
+    }
+    EXEC SQL COMMIT WORK;
+
+
+    SYS_TREF;
+
+
+    return ERR_NONE; 
+
+}
+/* ---------------------------------------------------------------- */
+static int g200_get_tpctx(symqtop_onout_ctx_t *ctx)
+{
+
+    int                 rc    = ERR_NONE;
+
+    SYS_TRSF;
+
+    /* get tmax context to relay svc */
+    if (tpgetctx(&SESSION_DATA->ctx) < 0){
+        SYS_HSTERR(SYS_LN, 792900, "tpgetctx failed jrn_no[%s]", SESSION->ilog_jrn_no);
+        return ERR_ERR;
+    }
+
+    //SESSION->cd = SESSION_READY_CD;
+    rc = sys_tprelay("EXTRELAY", &SESSION_DATA->cb, 0, &SESSION_DATA->ctxt);
+    if (rc == ERR_ERR){
+        SYS_HSTERR(SYS_LN, SYS_GENERR, "sys_tprelay failed cd[%d] jrn_no[%s]", SESSION->cd, SESSION->ilog_jrn_no);
+        return ERR_ERR;
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+}
+
+/* ---------------------------------------------------------------- */
+static int j100_set_session(symqtop_onout_ctx_t *ctx)
+{
+
+    int                 rc                      = ERR_NONE;
+    char                jrn_no[LEN_JRN_NO+1]    = {0};      //27 자리 
+
+    SYS_TRSF;
+
+    /* 저널 번호 및 corr_id , msg_id 채번  */
+    utoclck(jrn_no);
+
+    memcpy(ctx->ilog_jrn_no, jrn_no+1, LEN_JRN_NO);
+    memcpy(ctx->jrn_no     , jrn_no+1, LEN_JRN_NO);
+
+    SYS_DBG("jrn_no [%s]", jrn_no);
+    SYS_DBG("ctx->ilog_jrn_no[%s]", ctx->ilog_jrn_no);
+
+    /* set session to list */
+    SESSION = set_session_to_list(ctx->ilog_jrn_no, SESSION_DATA_SIZE);
+    SYS_DBG("SESSION[%p]", SESSION);
+    if (SESSION = 0x00){
+        SYS_HSTERR(SYS_LN, sys_err_code(), "%s", sys_err_msg());
+        return ERR_ERR;
+    }
+
+    memcpy(SESSION->jrn_no, ctx->jrn_no, LEN_JRN_NO);
+
+    if(EXPARM){
+        SESSION->wait_sec = atoi(EXPARM->time_val);  //EXPARM->time_val 값이 없으면 파라미터 값을 따른다. 
+        //SESSION->wait_sec = 5;
+    }
+
+    SYS_DBG("SESSION_DATA %s", SESSION_DATA); //SESSION_DATA ctx->session
+
+    /* save SVC Commbuff */
+    rc = syocbdb(ctx->cb, &SESSION_DATA->cd);
+    if (rc == ERR_ERR){
+        SYS_HSTERR(SYS_LN, 8600, "syocbdb  failed jrn_no[%.27s] ", ctx->ilog_jrn_no);
+        return ERR_ERR;
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+}
+
+/* ---------------------------------------------------------------- */
+static int j200_make_req_data(symqtop_onout_ctx_t *ctx)
+{
+
+    long                rc          = ERR_NONE;
+    long                data_len    = 0;
+    long                req_len     = 0; 
+    int                 len;
+    int                 size;
+    char                *hp, *dp, *dp2, *dp3, buff[10];
+    res_data_t          _res_data   = {0};
+    exi0280_t           exi0280;
+    hcmihead_t          *hcmihead;
+    hcmihead_t          *recv_hcmihead;
+
+    SYS_TRSF;
+
+    memset(g_temp_buf, 0x00, sizeof(g_temp_buf));
+    dp = g_temp_buf;
+
+    /* 송신길이 검증 */
+    len = sysocbgs(ctx->cb, IDX_HOSTSENDDATA);
+    if (len <=0 ){
+        SYS_HSTERR(SYS_NN, ERR_SVC_SNDERR, "DATA NOT FOUND");
+        return ERR_ERR;
+    }
+    
+    /* ----------------------------------------------- */
+    SYS_DBG("e200_make_req_data :data_len [%d]", len);
+    /* ----------------------------------------------- */
+
+    /* 송신할 데이터 */
+    dp2 = (char *) sysocbgs(ctx->cb, IDX_HOSTSENDDATA);
+    if (dp2 == NULL){
+        SYS_HSTERR(SYS_NN, ERR_SVC_SNDERR, "DATA NOT FOUND");
+        return ERR_ERR;
+    }
+    SYS_DBG("HOSTSENDDATA :dp2 [%s]", dp2);
+
+    SYSGWINFO->sys_type = SYSGWINFO_SYS_CORE_BANK;
+
+    /* 1200message 경우 NULL TRIM */
+    if (SYSGWINFO->msg_type == SYSGWINFO_MSG_1200){
+        SYS_DBG("1200전문 NULL처리 ");
+        memset(&exi0280, 0x00, sizeof(exi0280_t));
+        exi0280.in.type = 2;
+        memcpy(exi0280,in.data, dp2, LEN_EXMSG1200);
+        exmsg1200_null_proc(&exi0280);
+
+        /* 전송데이터 복사 */
+        memcpy(&dp[g_head_len], exi0280.out.data, LEN_EXMSG1200_COMM);
+        g_temp_len = LEN_EXMSG1200_COMM;
+
+        /* 기타 데이터가 추가 되어 있는 경우 1304 보다 클때  */
+        if (len > LEN_EXMSG1200){
+            SYS_DBG("기타데이터 감지 ");
+            memcpy(&dp[g_head_len + g_temp_len], &dp2[LEN_EXMSG1200], (len - LEN_EXMSG1200));
+            g_temp_len += (len - LEN_EXMSG1200);
+        }
+    }else{
+        SYS_DBG("기타 전문:[%s]", dp2);
+        /* 전송데이터 복사 */
+        memcpy(&dp[g_head_len], dp2, len);
+        g_temp_len = len;
+    }
+
+    SYS_DBG("전송할 데이터 [%d][%.*s]", g_temp_len, g_temp_len, &dp[g_head_len]);
+
+    /* ----------------------------------------------- */
+    /* hcmihead                                        */
+    /* ctx->session->req_data->hcmihead                */
+    /* ----------------------------------------------- */
+    /* 통신헤더 설정 */
+    memset(dp, 0x20, g_head_len);
+
+    hcmihead = (hcmihead_t *)dp;
+
+    /* 응답으로 호스트에 전송하는 경우  */
+    hp = sysocbgp(ctx->cb, IDX_TCPHEAD);
+    if (hp != NULL){
+        memcpy(dp, hp, g_head_len);
+    }
+    SYS_DBG("hp[%s]", hp);
+
+    //TOPS로 전송할 24바이트 corr_id조립 (20바이트 앞에 0000을 추가)
+    recv_hcmihead = (hcmihead_t *) hp;
+    
+    memset(ctx->corr_id,   0x00, sizeof(ctx->corr_id));
+    memcpy(ctx->corr_id, "0000", 4);
+    memcpy(&ctx->corr_id[4], res_data->hcmihead.queue_name, LEN_HCMIHEAD_QUEUE_NAME);
+
+    SYS_DBG("(ctx->corr_id: [%s]", (ctx->corr_id);
+
+    if (SYSGWINFO->msg_type == SYSGWINFO_MSG_1200) {
+        memcpy(hcmihead->tx_code, &dp2[10],  LEN_TX_CODE);
+    }else{
+        memcpy(hcmihead->tx_code, &dp2[9],  LEN_TX_CODE);
+    }
+    hcmihead->comm_type = 'S';
+
+    sprint(buff, "%03d", SYSGWINFO->time_val);
+    memcpy(hcmihead->wait_sec, buff, LEN_HCMIHEAD_WAIT_TIME);
+    hcmihead->conn_type = CONT_TYPE_END;
+
+    sprint(buff, "%05d", g_temp_len);
+    memcpy(hcmihead->data_len, buff, LEN_HCMIHEAD_DATA_LEN);
+    hcmihead->cnvt_type = 0;
+
+    memcpy(hcmihead->tran_id  , dp2, LEN_HCMIHEAD_TRANS_ID );
+    memcpy(hcmihead->resp_code, '0', LEN_HCMIHEAD_RESP_CODE);
+    
+    /* 일련번호 채번 : 호스트로부터 응답을 받는 경우 */
+}
+
+/* ---------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------- */
+/* ---------------------------------------------------------------- */
