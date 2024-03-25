@@ -2171,10 +2171,34 @@ static int el_data_chg(exmsg1200_t *exmsg1200, exparm_t *exparm)
 /* -------------------------------------------------------------------------------- */
 int apsvrdone()
 {
+    
     int           i;  
+    int           rc            = ERR_NONE;
+    symqtop_onout_ctx_t _ctx    = {0};
+    symqtop_onout_ctx_t *ctx    = &_ctx;
+    session_t   *session        = session_global.head_session;
+    session_t   *session2       = exmqmsg_001_t       exmqmsg_001;
+    
+    SYS_TRSF;
+
+    SYS_DBG("Current Session Cnt[%d] ", session_global.session_cnt);
+
+    while(session != 0x00) {
+        session2 = session->next;
+
+        SYS_HSTERR(SYS_LN, ERR_SVC_SNDERR, "SEVICE DOWN. cd[%d] jrn_no[%s]", session->cd, session->ilog_jrn_no);
+
+        x000_error_proc(ctx);
+
+        session = session2;
+
+        session_global.session_cnt--;
+    }
+
+    SYS_TREF;
 
     SYS_DBG("Server End ");
 
     return ERR_NONE;
-
 }
+/* ----------------------- End of Program ------------------------------- */
