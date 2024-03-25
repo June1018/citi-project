@@ -115,7 +115,7 @@ struct symqtop_onout_global_s {
     int                 g_temp_len;                     /* 임시 사용 buffer에 저장한 데이터 길이  */
     int                 g_db_connect;
     char                g_temp_buf[8192];               /* 임시 사용 buffer */
-    int                 g_head_len;                     /* 통신헤더 길이 */
+    int                 g_header_len;                     /* 통신헤더 길이 */
 
 commbuff_t              g_commbuff;
 symqtop_onout_ctx_t     _ctx; 
@@ -410,9 +410,9 @@ static int a000_initial(int argc, char *argv[])
     memset(g_arch_head.eff_file_name, 0x00, g_arch_head.eff_file_name);
 
     /* 통신 헤더 */
-    g_head_len = sizeof(hcmihead_t);
+    g_header_len = sizeof(hcmihead_t);
     /* -------------------------------------------------------------- */
-    SYS_DBG("a000_initial: header_len = [%d]", g_head_len);
+    SYS_DBG("a000_initial: header_len = [%d]", g_header_len);
     /* -------------------------------------------------------------- */   
 
     /* callback function register to tpcall response */
@@ -813,14 +813,14 @@ static int e300_set_commbuff(symqtop_onout_ctx_t    *ctx)
     dp = &as_data->hcmihead;
 
     memcpy(as_data->indata, req_data->indata, (req_len - LEN_HCMIHEAD));
-    memcpy(&dp[g_head_len],  as_data->indata, (req_len - LEN_HCMIHEAD));
+    memcpy(&dp[g_header_len],  as_data->indata, (req_len - LEN_HCMIHEAD));
     utohexdp((char *)dp, 1272);
 
     /* 거래 파라미터 정보 */
     memset(&exi0212, 0x00, sizeof(exi0212_t));
     exi0212.in.func_code = 2;
 
-    exmsg1200 = (exmsg1200_comm_t) &dp[g_head_len];
+    exmsg1200 = (exmsg1200_comm_t) &dp[g_header_len];
     memcpy(exi0212.in.appl_code, exmsg1200->appl_code, LEN_APPL_CODE);
     memcpy(exi0212.in.tx_code  , exmsg1200->tx_code  , LEN_TX_CODE  );
 
@@ -888,7 +888,7 @@ static int e300_set_commbuff(symqtop_onout_ctx_t    *ctx)
     }
 
     /* set exmsg1200 commbuff */
-    rc = sysocbsi(&SESSION_DATA->cb, IDX_EXMSG1200, &dp[g_head_len], (req_len - LEN_HCMIHEAD));
+    rc = sysocbsi(&SESSION_DATA->cb, IDX_EXMSG1200, &dp[g_header_len], (req_len - LEN_HCMIHEAD));
     if (rc == ERR_ERR) {
 
         ex_syslog(LOG_ERROR, "[APPL_DM] %s e300_set_commbuff():"
@@ -897,7 +897,7 @@ static int e300_set_commbuff(symqtop_onout_ctx_t    *ctx)
         return ERR_ERR;
     }
 
-    rc = sysocbsi(&SESSION_DATA->cb, IDX_TCPHEAD, &dp, (req_len - g_head_len));
+    rc = sysocbsi(&SESSION_DATA->cb, IDX_TCPHEAD, &dp, (req_len - g_header_len));
     if (rc == ERR_ERR) {
 
         ex_syslog(LOG_ERROR, "[APPL_DM] %s e300_set_commbuff():"
@@ -1067,10 +1067,10 @@ static int f200_check_reply_msg(symqtop_onout_ctx_t *ctx, UCSMSGINFO *reply)
         SYS_DBG("test 11[%s]", SESSION_DATA->as_data);
         SYS_DBG("test 11 req_len[%d]", SESSION_DATA->req_len);
 
-        memcpy(&g_temp_buf, &SESSION_DATA0>as_data[g_head_len], (SESSION_DATA->req_len -g_head_len));
+        memcpy(&g_temp_buf, &SESSION_DATA0>as_data[g_header_len], (SESSION_DATA->req_len -g_header_len));
         SYS_DBG("처음 f200_check_reply_msg: g_temp_buf[%s]", g_temp_buf);
 
-        g_temp_len = SESSION_DATA->req_len - g_head_len;
+        g_temp_len = SESSION_DATA->req_len - g_header_len;
 
         SYS_DBG("g_temp_len[%d]", g_temp_len);
 
@@ -1201,9 +1201,9 @@ int static f300_make_res_data_proc(symqtop_onout_ctx_t *ctx)
 
     /* 전문 변환 */
     memset(&g_temp_buf, 0x00, sizeof(g_temp_buf));
-    memset(&g_temp_buf, 0x20, g_head_len);
+    memset(&g_temp_buf, 0x20, g_header_len);
 
-    //size = g_temp_len + g_head_len +256;
+    //size = g_temp_len + g_header_len +256;
     size = ctx->mqinfo.msglen +256;
     dp = (char *) malloc(size);
     if (dp == NULL){
@@ -1216,17 +1216,17 @@ int static f300_make_res_data_proc(symqtop_onout_ctx_t *ctx)
     }
     memset(dp, 0x00, sizeof(dp));
 
-    memcpy(g_temp_buf, &res_data->hcmihead, g_head_len);
+    memcpy(g_temp_buf, &res_data->hcmihead, g_header_len);
     //memcpy(&g_temp_buf[14], &res_data->hcmihead.cont_type  , 1);
     //memcpy(&g_temp_buf[15], &res_data->hcmihead.data_len   , LEN_HCMIHEAD_DATA_LEN);
     //memcpy(&g_temp_buf[21], &res_data->hcmihead.tran_id    , LEN_HCMIHEAD_TRAN_ID);
     //memcpy(&g_temp_buf[25], &res_data->hcmihead.queue_name , LEN_HCMIHEAD_QUEUE_NAME);
     //memcpy(&g_temp_buf[45], &res_data->hcmihead.resp_code  , LEN_HCMIHEAD_RESP_CODE);
 
-    memcpy(&g_temp_buf[g_head_len], &res_data->outdata  , (ctx->mqinfo.msglen - g_head_len));
+    memcpy(&g_temp_buf[g_header_len], &res_data->outdata  , (ctx->mqinfo.msglen - g_header_len));
 
     //call UTRY 세팅 
-    memcpy(&g_temp_buf[g_head_len], HOST_RSPN_TRANS_ID  , strlen(HOST_RSPN_TRANS_ID));
+    memcpy(&g_temp_buf[g_header_len], HOST_RSPN_TRANS_ID  , strlen(HOST_RSPN_TRANS_ID));
 
     SYS_DBG(" 변환전 full_data [%.*s]", ctx->mqinfo.msglen, (char *)g_temp_buf);
 
@@ -1243,11 +1243,11 @@ int static f300_make_res_data_proc(symqtop_onout_ctx_t *ctx)
     }
 
     /* 데이터 코드 변환 */
-    //utoas2eb((unsinged char *)g_temp_buf, g_head_len, (unsinged char *)dp);
-    memcpy(dp, g_temp_buf, g_head_len);
+    //utoas2eb((unsinged char *)g_temp_buf, g_header_len, (unsinged char *)dp);
+    memcpy(dp, g_temp_buf, g_header_len);
 
     host_data_conv(AS_TO_BE, g_temp_buf, ctx->mqinfo.msglen, (int)SYSGWINFO->msg_type);
-    memcpy(&dp[g_head_len], &g_temp_buf[g_head_len], g_temp_len);
+    memcpy(&dp[g_header_len], &g_temp_buf[g_header_len], g_temp_len);
     len = ctx->mqinfo.msglen;
 
     /* 변환후 데이티 로그 */
@@ -1622,37 +1622,37 @@ static int j200_make_req_data(symqtop_onout_ctx_t *ctx)
         exmsg1200_null_proc(&exi0280);
 
         /* 전송데이터 복사 */
-        memcpy(&dp[g_head_len], exi0280.out.data, LEN_EXMSG1200_COMM);
+        memcpy(&dp[g_header_len], exi0280.out.data, LEN_EXMSG1200_COMM);
         g_temp_len = LEN_EXMSG1200_COMM;
 
         /* 기타 데이터가 추가 되어 있는 경우 1304 보다 클때  */
         if (len > LEN_EXMSG1200){
             SYS_DBG("기타데이터 감지 ");
-            memcpy(&dp[g_head_len + g_temp_len], &dp2[LEN_EXMSG1200], (len - LEN_EXMSG1200));
+            memcpy(&dp[g_header_len + g_temp_len], &dp2[LEN_EXMSG1200], (len - LEN_EXMSG1200));
             g_temp_len += (len - LEN_EXMSG1200);
         }
     }else{
         SYS_DBG("기타 전문:[%s]", dp2);
         /* 전송데이터 복사 */
-        memcpy(&dp[g_head_len], dp2, len);
+        memcpy(&dp[g_header_len], dp2, len);
         g_temp_len = len;
     }
 
-    SYS_DBG("전송할 데이터 [%d][%.*s]", g_temp_len, g_temp_len, &dp[g_head_len]);
+    SYS_DBG("전송할 데이터 [%d][%.*s]", g_temp_len, g_temp_len, &dp[g_header_len]);
 
     /* ----------------------------------------------- */
     /* hcmihead                                        */
     /* ctx->session->req_data->hcmihead                */
     /* ----------------------------------------------- */
     /* 통신헤더 설정 */
-    memset(dp, 0x20, g_head_len);
+    memset(dp, 0x20, g_header_len);
 
     hcmihead = (hcmihead_t *)dp;
 
     /* 응답으로 호스트에 전송하는 경우  */
     hp = sysocbgp(ctx->cb, IDX_TCPHEAD);
     if (hp != NULL){
-        memcpy(dp, hp, g_head_len);
+        memcpy(dp, hp, g_header_len);
     }
     SYS_DBG("hp[%s]", hp);
 
@@ -1702,11 +1702,48 @@ static int j200_make_req_data(symqtop_onout_ctx_t *ctx)
 
     /* ----------------- session 저장 --------------------------- */
 
-    /* 전문변화 */
     size = g_temp_len + g_temp_len + 256;
     //req_data = sys_tpcall("CARRY", req_len + 100);
     req_data = malloc(req_len + 100);
-    
+    if (req_data == NULL){
+        SYS_HSTERR(SYS_LN, SYS_GENERR, "sys_tpcall failed [%d jrn_no[%s]", len, SESSION->ilog_jrn_no);
+        return ERR_ERR;
+    }
+
+    memset(req_data, 0x00, req_len + 100);
+    memset(req_data, 0x20, req_len);
+
+    if (SYSGWINFO->msg_type, == SYSGWINFO_MSG_1200){
+        memcpy(req_data->hcmihead.tx_code, &dp2[10], LEN_TX_CODE);
+    }else{
+        memcpy(req_data->hcmihead.tx_code, &dp2[9] , LEN_TX_CODE);
+    }
+    req_data->hcmihead.comm_type = 'S';
+
+    /* ----------------- session 저장 끝   ------------------------- */
+
+    /* 전문 변환 */
+    size = g_temp_len + g_header_len + 256;
+    dp3 = (char *)malloc(size);
+    if (dp3 == NULL){
+        ex_syslog(LOG_FATAL, "[APPL_DM] syonthsend(): 메모리 할당 에러 "
+                             "[해결방안 ] 시스템 담당자 call " );
+        ex_syslog(LOG_FATAL, "[APPL_DM] %s syonthsend(): 메모리 할당 에러: %d "
+                             "[해결방안 ] 시스템 담당자 call "
+                             __FILE__, size );
+        SYS_HSTERR(SYS_NN, ERR_SVC_SNDERR, "MEMORY ALLOC ERR");
+        return ERR_ERR;
+    }
+    /* ------------------------------------------------------------ */
+    SYS_DBG("sizeof(hcmihead_t)   : [%d]",   sizeof(hcmihead_t));
+    SYS_DBG("sizeof(g_header_len) : [%d]",   sizeof(g_header_len));
+    /* header code 변환 */
+    /* ------------------------------------------------------------ */
+    SYS_DBG("변환전 dp=[%.*s]",  (g_header_len + g_temp_len), (char *)dp );
+    SYS_DBG("변환전 hcmihead data=[%.*s] : [%d]",   sizeof(hcmihead_t), (char *)g_temp_buf);
+    SYS_DBG("변환전 full_data    =[%.*s]",   (g_header_len, (char *)g_temp_buf));
+    /* ------------------------------------------------------------ */
+       
 }
 
 /* ---------------------------------------------------------------- */
