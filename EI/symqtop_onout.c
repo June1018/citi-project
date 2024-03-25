@@ -1683,7 +1683,30 @@ static int j200_make_req_data(symqtop_onout_ctx_t *ctx)
     memcpy(hcmihead->tran_id  , dp2, LEN_HCMIHEAD_TRANS_ID );
     memcpy(hcmihead->resp_code, '0', LEN_HCMIHEAD_RESP_CODE);
     
+
     /* 일련번호 채번 : 호스트로부터 응답을 받는 경우 */
+    if (IS_SYSGWINFO_GW_REPLY) {
+        g_call_seq_no++;
+        if (g_call_seq_no > 5999999)
+            g_call_seq_no = 1;
+        sprintf(buff, "%07d", g_call_seq_no);
+        memcpy(hcmihead->mint_rfk , buff, 7);
+    }
+
+    /* --------------------------------------------------------- */
+    SYS_DBG("b000_make_send_data: input len[%d]", len); 
+    SYS_DBG("b000_make_send_data: tx_code=[%10.10s] tran_id[%-4.4s]"
+                            , hcmihead->tx_code, hcmihead->tran_id);
+
+    PRINT_HCMIHEAD(hcmihead);
+
+    /* ----------------- session 저장 --------------------------- */
+
+    /* 전문변화 */
+    size = g_temp_len + g_temp_len + 256;
+    //req_data = sys_tpcall("CARRY", req_len + 100);
+    req_data = malloc(req_len + 100);
+    
 }
 
 /* ---------------------------------------------------------------- */
