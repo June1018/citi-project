@@ -524,6 +524,45 @@ static int f100_mqmsg_proc(symqtop_top_ctx_t    *ctx, MQMD *mqmd)
         memcpy(mqmsg_001.corr_id, MQ_INFO->corrid, (LEN_EXMQMSG_001_CORR_ID));  
     }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
 }
 
 /* ---------------------------------------------------------------- */
