@@ -2145,6 +2145,28 @@ static int el_data_chg(exmsg1200_t *exmsg1200, exparm_t *exparm)
     int                 rc          = ERR_NONE;
 
     /* 전자금융 로깅 */
+    if (memcmp(exmsg1200->appl_code, "094", LEN_APPL_CODE) != 0){
+        return ERR_NONE;
+    }
+
+    if (memcmp(exparm->tot_info_flag_3[0])  != 0){
+        return ERR_NONE;
+    }
+
+    /* ----------------------------------------- */
+        PRINT_EXMSG1200(exmsg1200);
+        PRINT_EXMSG1200_2(exmsg1200);
+    /* ----------------------------------------- */
+
+    memcpy(exmsg1200->offr_no, "777777", 6);
+
+    /* ----------------------------------------- */
+        PRINT_EXMSG1200(exmsg1200);
+        PRINT_EXMSG1200_2(exmsg1200);
+    /* ----------------------------------------- */
+
+    return ERR_NONE;
+
 }
 /* -------------------------------------------------------------------------------- */
 int apsvrdone()
