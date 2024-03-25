@@ -1744,6 +1744,7 @@ static int j200_make_req_data(symqtop_onout_ctx_t *ctx)
     SYS_DBG("변환전 full_data    =[%.*s]",   (g_header_len, (char *)g_temp_buf));
     /* ------------------------------------------------------------ */
        
+    memcpy(req_data->indata, g_temp_buf, (g_header_len + g_temp_len));
 }
 
 /* ---------------------------------------------------------------- */
