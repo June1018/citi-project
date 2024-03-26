@@ -515,6 +515,7 @@ static int f100_mqmsg_proc(symqtop_top_ctx_t    *ctx, MQMD *mqmd)
     //memcpy(&dp, MQ_INFO->msgbuf, (MQ_INFO->msglen - LEN_HCMIHEAD));
 
     //옵션에서 corr_id를 가져와 queue name에 저장
+
     if (strlen(MQ_INFO->corrid) < 20){
         SYS_DBG("corr_id is NULL (취급요청거래 )");
         //memcpy(&g_temp_buf[25], "              ", (LEN_EXMQMSG_001_CORR_ID - 4));
@@ -524,96 +525,142 @@ static int f100_mqmsg_proc(symqtop_top_ctx_t    *ctx, MQMD *mqmd)
         memcpy(mqmsg_001.corr_id, MQ_INFO->corrid, (LEN_EXMQMSG_001_CORR_ID));  
     }
 
+    SYS_DBG("strlen(MQ_INFO)->msgbuf: [%d]", strlen(MQ_INFO->msgbuf));
+
+    //memcpy(&g_temp_buf[LEN_HCMIHEAD], MQ_INFO->msgbuf + LEN_HCMIHEAD, (MQ_INFO->msglen - LEN_HCMIHEAD));
+    memcpy(g_temp_buf, MQ_INFO->msgbuf, (MQ_INFO->msg_len));
+
+#ifdef _DEBUG
+    /* ---------------------------------------------------------------------- */
+    //PRINT_HCMIHEAD(&hcmihead);
+    //utohexdp(dp, MQ_INFO->msglen);
+    SYS_DBG("g_temp_buf:[%s]", g_temp_buf);
+    /* ---------------------------------------------------------------------- */
+#endif
 
 
+    /* -------------------------LOG DB 저장 ---------------------------------- */
+
+    memcpy(mqmsg_001.chnl_code, g_chnl_code, LEN_EXMQMSG_001_CHNL_CODE);
+    memcpy(mqmsg_001.appl_code, g_appl_code, LEN_EXMQMSG_001_APPL_CODE);
+    mqmsg_001.io_type = 0; //0이면 get 1이며 put
 
 
+    SYS_DBG("MQINFO->msglen[%d]", MQ_INFO->msg_len);    //1272
 
+    if (MQ_INFO->msglen < 1){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f100_mqmsg_insert() Message Length ERROR %d MQ_INFO->msglen[%d]", __FILE__, tperrno, MQ_INFO->msglen);
+        return ERR_ERR;
+    }
 
+    mqmsg_001.mqlen = MQ_INFO->msglen;
+    //memcpy(mqmsg_001.mqmsg, MQ_INFO->msgbuf, mqmsg_001.mqlen);
+    memcpy(mqmsg_001.mqmsg, g_temp_buf, mqmsg_001.mqlen);
 
+    memset(&mqimsg001, 0x00, sizeof(mqimsg001_t));
+    mqimsg001.in.mqmsg_001 = &mqmsg_001;
 
+    memcpy(mqimsg001.in.job_proc_type, "4" , LEN_MQIMSG001_PROC_TYPE);
 
+    db_rc = mqomsg001(&mqimsg001);
+    if (db_rc = ERR_ERR){
+        EXEC SQL ROLLBACK WORK;
+        ex_syslog(LOG_FATAL, "[APPL_DM] %s f100_mqmsg_proc : MQMSG001 INSERT ERROR call mqomsg001", __FILE__ );
+        return ERR_ERR;
+    }
+    EXEC SQL COMMIT WORK;
 
+    sysgwinfo.sys_type = SYSGWINFO_SYS_CORE_BANK; //core bank flag 
 
+    //HCMIHEAD queue_name corr_id저장
+    SYS_DBG("g_svc_name [%s]", g_svc_name);
+    /*
+    if (strcmp(g_svc_name, "SYMQTOP_ONINRG") == 0) ||
+        strcmp(g_svc_name, "SYMQTOP_FTPINRG") == 0) {
+        memcpy(&g_temp_buf[25], mqmsg_001.corr_id, (LEN_EXMQMSG_001_CORR_ID - 4));
+    }else{
+        memcpy(&g_temp_buf[25], mqmsg_001.corr_id[4], (LEN_EXMQMSG_001_CORR_ID - 4))
+    } //2023.07.04 SYMQTOP_ONINRG corr_id 24로     */
+    memcpy(&g_temp_buf[25], &mqmsg_001.corr_id[4], (LEN_EXMQMSG_001_CORR_ID -4));
+    SYS_DBG("g_temp_buf[%s]", g_temp_buf);
+    rc = sysocbsi(ctx->cb, IDX_SYSGWINFO, &sysgwinfo, LEN_SYSGWINFO);
+    if (rc == ERR_ERR ){
+        SYS_HSTERR(SYS_LN, 8700,"sysocbsi(IDX_SYSGWINFO) failed -queue name");
+        return ERR_ERR;
+    }
 
+    /* ---------------buffer 저장 ------------------------------------------- */
+    //rc = sysocbsi(ctx->cb, IDX_SYSIOUTQ, MQ_INFO->msgbuf, MQ_INFO->msglen);
+    rc = sysocbsi(ctx->cb, IDX_SYSIOUTQ, &g_temp_buf, MQ_INFO->msglen);
+    if (rc == ERR_ERR){
+        SYS_HSTERR(SYS_LN, SYS_GENERR ,"IDX_SYSIOUTQ setting failed corr_id[%.*24]", mqmsg_001.corr_id);
+        sysocbfb(ctx->cb);
+        return ERR_ERR;
+    }
+    SYS_DBG("IDX_SYSIOUTQ[%s]", (char *) sysocbgp(ctx->cb, IDX_SYSIOUTQ));
 
+    //call svc
+    SYS_TRY(g000_call_svc(ctx));
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-
-}
-
-/* ---------------------------------------------------------------- */
-static void y000_timeout_proc(session_t *session)
-{
-
-    symqtop_top_ctx_t     _ctx    = {0};
-    symqtop_top_ctx_t     *ctx    = &CTX_T               ctxt;
-    
-
-    SYS_TRSF;
-
-    ctx->cb = &ctx->commbuff_t _cb;
-
-    ex_syslog(LOG_FATAL, "[APPL_DM] y000_timeout_proc() 발생 [해결방안] 시스템 담당자 call");
-
-    SESSION = session;
-
-    x000_error_proc(ctx);
-
+    sysocbfb(ctx->cb);
     SYS_TREF;
 
-    return;
-}
+    return ERR_NONE;
 
+SYS_CATCH:
+
+    sysocbfb(ctx->cb);
+    SYS_TREF;
+
+    return ERR_ERR;
+    
+
+}
 /* ---------------------------------------------------------------- */
-static int z000_free_session(symqtop_top_t *ctx)
+static int g000_call_svc(symqtop_top_ctx_t  *ctx)
 {
-    int                 rc          = ERR_NONE;
+    int                 rc    = ERR_NONE;
 
     SYS_TRSF;
 
-    #ifdef  _DEBUG
-       //utohexdp(TCPHEAD, 72);
-       //utohexdp(TCPHEAD, 72);
-    #endif 
+    #ifdef _DEBUG
+        //utohexdp(TCPHEAD, 72);
+        //utohexdp(EXPARM, sizeof(exparm_t));
+    #endif
 
-    //g_call_svc_name =SYSMQTOP_ONINR / SYMQTOP_ONOUT
-    rc = sys_tpacall(g_call_svc_name, ctx->cb, TPNOREPLY, | TPNOTRAN);
+    // g_call_svc_name =SYMQTOP_ONINR / SYMQTOP_ONOUT
+    rc = sys_tpacall(g_svc_name, ctx->cb, TPNOREPLY | TPNOTRAN);
     if (rc < 0){
-        SYS_HSTERR(SYS_LN, ERR_SVC_CALL, "SVC(%s) call failed [%d]", g_call_svc_name, tperrno);
+        SYS_HSTERR(SYS_LN, ERR_SVC_CALL, "SVC[%s] call failed;[%d]", g_call_svc_name, tperrno);
         return ERR_ERR;
     }
 
     SYS_TREF;
 
     return ERR_NONE;
+
+}
+
+/* ---------------------------------------------------------------- */
+static int z000_free_proc(symqtop_top_t *ctx)
+{
+    int                 rc          = ERR_NONE;
+
+    //SYS_TRSF;  10sec마다 로그 쌓이는 것 방지
+
+    if (ctx->cb){
+        sysocbfb(ctx->cb);
+        ctx->cb = 0x00;
+    }
+
+    //SYS_TREF;
+
+    return ERR_NONE;
 }
 /* -------------------------------------------------------------------------------- */
 int apsvrdone()
 {
+    
     int          i;
 
     sysocbfb(ctx->cb);
