@@ -409,14 +409,246 @@ static int b000_csta_select(ctn2400_ctx_t   *ctx)
             EXEC SQL CLOSE CUR_CTARG_01;
             g_ctinfo_cursor = 0;
             return ERR_ERR;
-        }else{
+        }
+        else{
             db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s b000_csta_select():"
+                        "CURSOR OEPN(CTSTA, CTINFO) ERROR[%d] MSG[%s] ",
+                        __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+            EXEC SQL CLOSE CUR_CTARG_01;
+            g_ctinfo_cursor = 0;
+            return ERR_ERR;
+        }
+    }
+
+    ctarg->sr_type[0]   = 'S';
+    memset(ctarg->blkno , '0' , LEN_CTARG_BLK_NO);
+    memset(ctarg->seq_no, '0' , LEN_CTARG_SEQ_NO);
+    SYS_DBG(" ======================================================== ");
+    SYS_DBG("                 FETCH DATA                               ");
+    SYS_DBG(" ======================================================== ");
+    SYS_DBG(" ctarg->proc_date          = [%.8s]", ctarg->proc_date     );
+    SYS_DBG(" ctarg->data_date          = [%.8s]", ctarg->data_date     );
+    SYS_DBG(" ctarg->appl_name          = [%.8s]", ctarg->appl_name     );
+    SYS_DBG(" ctarg->van_id             = [%.3s]", ctarg->van_id        );
+    SYS_DBG(" ctarg->host_last_no       = [%.7s]", ctarg->host_last_no  );
+    SYS_DBG(" ctarg->host_sta_flag      = [%.1s]", ctarg->host_sta_flag );
+    SYS_DBG(" ======================================================== ");
+
+    SYS_TREF;
+
+    return ERR_NONE;
+}   
+
+/* --------------------------------------------------------------------------------------------------------- */
+static int c000_data_send_proc(ctn2400_ctx_t    *ctx, int end_flag)
+{
+
+    int                 rc = ERR_NONE;
+    int                 i;
+    cti0026x_t          cti0026x;
+    cti0030f_t          cti0030f;  
+    ctarg_t             *ctarg;
+    cthlay_t            cthlay;
+    cthlay_t            cthlay2;
+ 
+    ctarg  = (ctarg_t  *) &ctx->ctarg;
+    cthlay = (cthlay_t *) &ctx->cthlay;
+
+    memcpy(ctarg->max_block_no, "0000", LEN_CTARG_MAX_BLOCK_NO);
+    memcpy(ctarg->max_seq_no,   "000" , LEN_CTARG_MAX_SEQ_NO);
+
+    /* 전송할 데이터가 존재시 */
+    if (end_flag == 0){
+        while(1){
+            tpschedule(-1);
+
+            /* ----------------------------------------- */
+            /* 수신원장 dbio call                          */
+            /* ----------------------------------------- */
+            rc = c100_ctmstr_select(ctx);
+
+            if (rc == ERR_NFD){
+                break;
+            }
+
+            if (rc == ERR_ERR){
+                ex_syslog(LOG_ERROR, "[APPL_DM] %s c000_data_send_proc():"
+                                     "대외계 -> 호스트 송신: 원장검색 오류 "
+                                     "proc_date[%.8s] van_type[%.2s] tiem_appl_name[%.8s] "
+                                     "[해결방안]업무 담당자 call"
+                                     , __FILE__, cthlay->proc_date
+                                     , cthlay->van_type, cthlay->item_appl_name);
+                c300_csta_update(ctx, 3);
+                return ERR_ERR;
+            }
+
+            /* ----------------------------------------- */
+            /* host layout set call                      */
+            /* ----------------------------------------- */
+            memset(&cti0026x, 0x00, sizeof(cti0026x_t));
+            cti0026x.in.cthlay   = &ctx->cthlay;
+            cti0026x.in.svr_flag = 1;
+
+            rc = cto0026x(&cti0026x);
+            if (rc == ERR_ERR) {
+                c200_ctmst_curosr_close(ctx);
+                c300_csta_update(ctx, 3);
+                ex_syslog(LOG_ERROR, "[APPL_DM] %s c000_data_send_proc():"
+                                     "대외계 -> 호스트 송신: 전문조립 오류 "
+                                     "proc_date[%.8s] van_type[%.2s] tiem_appl_name[%.8s] "
+                                     "[해결방안]업무 담당자 call"
+                                     , __FILE__, cthlay->proc_date
+                                     , cthlay->van_type, cthlay->item_appl_name);
+                return ERR_ERR;
+            }
+
+            /* ----------------------------------------- */
+            /* 마지막 블럭 및 일련번호인경우 종료               */
+            /* ----------------------------------------- */
+            if ((memcmp(&ctarg->host_last_no[0], cthlay->block_no, LEN_CTHLAY_BLOCK_NO) == 0) &&
+                (memcmp(&ctarg->host_last_no[4], cthlay->seq_no  , LEN_CTHLAY_SEQ_NO  ) == 0)){
+                    cthlay->data_end_flag[0] = '1';
+            }
+
+            /* ----------------------------------------- */
+            /* 선택송신일 경우 중복 허용                       */
+            /* ----------------------------------------- */
+            if (ctarg->host_sta_flag[0] == '5'){
+                    cthlay->dup_flag[0] = '1';
+            }
+            /* ----------------------------------------- */
+            /* host로 송신 시작                            */
+            /* ----------------------------------------- */
+            if ((memcmp(cthlay->block_no, "0001", LEN_CTHLAY_BLOCK_NO) == 0 ) &&
+                (memcmp(cthlay->seq_no,   "001" , LEN_CTHLAY_SEQ_NO  ) == 0 )){
+                rc = c300_csta_update(ctx, 1);
+                if (rc == ERR_ERR){
+                    c200_ctmst_curosr_close(ctx);
+                    ex_syslog(LOG_ERROR, "[APPL_DM] %s c000_data_send_proc():"
+                                            "상태 테이블(CTSTA) UPDATE ERROR 1", __FILE__);
+                    return ERR_ERR;
+                }
+            }
+            memcpy(cthlay->data_date, ctarg->data_date, LEN_CTHLAY_DATA_DATE);
+
+            memcpy(ctx->host_send_data, cthlay,  sizeof(cthlay_t));
+            ctx->host_send_len = strlen(ctx->host_send_data);
+
+            /* ----------------------------------------- */
+            /* 전문 송신 및 응답 처리                         */
+            /* ----------------------------------------- */
+            rc = v000_gw_call(ctx, 1);
+            if (rc == ERR_ERR){
+                c200_ctmst_curosr_close(ctx);
+                c300_csta_update(ctx, 3);
+                ex_syslog(LOG_ERROR, "[APPL_DM] %s c000_data_send_proc():"
+                                     "대외계 -> 호스트 송신: GW응답코드 오류 "
+                                     "proc_date[%.8s] van_type[%.2s] tiem_appl_name[%.8s] "
+                                     "[해결방안]업무 담당자 call"
+                                     , __FILE__, cthlay->proc_date
+                                     , cthlay->van_type, cthlay->item_appl_name);
+                return ERR_TIME;
+            }
+
+            /* ----------------------------------------- */
+            /* 에러  응답시 처리                             */
+            /* ----------------------------------------- */
+            cthlay2 = (cthlay *) ctx->host_recv_data;
+            PRINT_CTHLAY((cthlay_t *) ctx->host_recv_data);
+            if (memcmp(cthlay2->err_code, "0000000", LEN_CTHLAY_ERR_CODE) != 0 ){
+                c200_ctmst_curosr_close(ctx);
+                c300_csta_update(ctx, 3);
+                /* ---------------------------- */
+                /* 에러 공통모듈  call             */
+                /* ---------------------------- */
+                ex_syslog(LOG_ERROR, "[APPL_DM] %s c000_data_send_proc():"
+                                     "대외계 -> 호스트 송신: 응답코드 오류[%.7s] "
+                                     "proc_date[%.8s] van_type[%.2s] tiem_appl_name[%.8s] "
+                                     "[해결방안]업무 담당자 call"
+                                     , __FILE__, cthlay2->err_code, cthlay->proc_date
+                                     , cthlay->van_type, cthlay->item_appl_name);
+                return ERR_ERR;
+            }
+            /* ----------------------------------------- */
+            /* host로 송신 종료                             */
+            /* ----------------------------------------- */
+            if ((memcmp(&ctarg->host_last_no[0], cthlay2->block_no, LEN_CTHLAY_BLOCK_NO) == 0) &&
+                (memcmp(&ctarg->host_last_no[4], cthlay2->seq_no  , LEN_CTHLAY_SEQ_NO  ) == 0)){
+                    rc = c300_csta_update(ctx, 9);
+                    if (rc == ERR_ERR){
+                        ex_syslog(LOG_ERROR, "[APPL_DM] %s c000_data_send_proc():"
+                                                "상태 테이블(CTSTA) UPDATE ERROR 1", __FILE__);
+                        return ERR_ERR;
+                    }
+                    
+            }
+        } /* end of while loop */
+    }
+    else{
+        /* ----------------------------------------- */
+        /* host로 layout set call                    */
+        /* ----------------------------------------- */
+        memset(&cti0026x, 0x00, sizeof(cti0026x_t));
+        cti0026x.in.cthlay   = &ctx->cthlay;
+        cti0026x.in.svr_flag = 1;
+
+        rc = cto0026x(&cti0026x);
+        if (rc == ERR_ERR){
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s c000_data_send_proc():"
+                                    "대외계 -> 호스트 송신: 전문조립 오류"
+                                    "proc_date[%.8s] van_type[%.2s] tiem_appl_name[%.8s] "
+                                    "[해결방안]업무 담당자 call"
+                                    , __FILE__, cthlay->proc_date
+                                    , cthlay->van_type, cthlay->item_appl_name);
+            return ERR_ERR; 
+
         }
 
+        cthlay->rspn_flag[0]        = '0'  /* 응답 불필요 */
+        cthlay->data_end_flag[0]    = '1'  /* 송수신 종료 */
+        cthlay->session_flag[0]     = '1'  /* session 종료 */
+
+        /* 송수신 오류발생되면 3회 Retry */
+        for (i = 0; i < 3; i++){
+            memcpy(ctx->host_send_data, cthlay, sizeof(cthlay_t));
+            ctx->host_send_len = strlen(ctx->host_send_data);
+            SYS_DBG("======================== 전송시작 ========================")
+            SYS_DBG("cthlay->rspn_flag        = [%0.1s]", cthlay->rspn_flag);
+            SYS_DBG("cthlay->data_end_flag    = [%0.1s]", cthlay->data_end_flag);
+            SYS_DBG("cthlay->session_flag     = [%0.1s]", cthlay->session_flag);
+            /* ----------------------------------------- */
+            /* host 송신                                  */
+            /* ----------------------------------------- */
+            rc = v000_gw_call(ctx, 0);
+            if (rc == ERR_NONE){
+                break;
+            }
+            else{
+                ex_syslog(LOG_ERROR, "[APPL_DM] %s c000_data_send_proc():"
+                                        "[%.8s %.2s %.8s] HOST SEND ERR담당직원 확인 ! "
+                                        , __FILE__, cthlay->proc_date
+                                        , cthlay->van_type, cthlay->item_appl_name);
+                tpschedule(10);
+            }
+        }
     }
-}   
+
+    SYS_TREF;
+
+    return ERR_NONE;
+}
+
+
 /* --------------------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------------------- */
+static int c100_ctmstr_select(ctn2400_ctx_t *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    ctmstr_t            ctmstr;
+    ctarg_t             *ctarg;
+    cthlay_t            cthlay;
+}
 /* --------------------------------------------------------------------------------------------------------- */
 /* --------------------------------------------------------------------------------------------------------- */
 /* --------------------------------------------------------------------------------------------------------- */
