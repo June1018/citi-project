@@ -185,18 +185,236 @@ int usermain(int argc, char argv[])
         /* --------------------------  */
         /* GR1535 전송할 데이터 조회 (KTI) */
         rc = f000_data_send(ctx);
-        if (rc == ERR_ERR){
+        if (rc == ERR_ERR || rc == ERR_NFD){
+            memset(&ctx->ctarg_kti, 0x00, sizeof(ctarg_t));
+        }
+        else{
+            /* GR1535 데이터  송신 주업무 처리(KTI) */
+            rc = f000_data_send_proc(ctx);
+            if (rc == ERR_ERR){
 
+            }
         }
         /* ------------------------------------------------------ */
 
         /* 전송할 데이터 조회 CORE */
         rc = b000_csta_select(ctx);
+        if (rc = ERR_ERR) {
+            if (tot_cnt > 0){
+                tot_cnt = 0;
+                /* 마지막 송신종료에 대한 send */
+                c000_data_send_proc(ctx, 1);
+            }
+            time(&tval1);
+            time_val = 300;
+            memset(&ctx->ctarg, 0x00, sizeof(ctarg_t));
+            continue;
+        }
+
+        /* 데이터 송신 주업무 처리 (Core) */
+        rc = c000_data_send_proc(ctx, 0;
+        if (rc == ERR_TIME){
+            time(&tval1);
+            time_val = 100;
+        }
+        else{
+            time(&tval1);
+            time_val = 5;
+            tot_cnt++;
+        }
+    }
+
+    return ERR_NONE;
+}
+
+
+/* --------------------------------------------------------------------------------------------------------- */
+static int a000_init_proc(ctn2400_ctx_t *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    sysicomm_t          sysicomm;
+    sysgwinfo_t         sysgwinfo;
+
+    SYS_TRST;
+
+    /* set commbuff */
+    memset((char *)ctx, 0x00, sizeof(ctn2400_ctx_t));
+    ctx->cb = &ctx->commbuff_t _cb;
+
+    /* SYSTEM GLOBAL 변수에 자신의 서비스명 저장 */
+    strcpy(g_arch_head.svc_name, "CTN2400");
+    memset(g_arch_head.err_file_name, 0x00, sizeof(g_arch_head.err_file_name));
+
+    /* SYSICOMM commbuff 항목 설정 */
+    memset(&sysicomm, 0x00, sizeof(sysicomm_t));
+    sysocbsi(ctx->cb, IDX_SYSICOMM, &sysicomm, sizeof(sysicomm_t));
+    SYSICOMM->intl_tx_flag = 0;
+    utoclck(SYSICOMM->ilog_no);
+    strcpy(SYSICOMM->svc_name,  "CTN2400");
+
+    SYSICOMM->pid_no = getpid();
+    strcpy(SYSICOMM->svc_name,  "CTN2400");
+
+    /* G/W Information COMMBUFF 생성 */
+    memset(&sysgwinfo, 0x00, sizeof(sysgwinfo_t));
+    sysgwinfo.sys_type = SYSGWINFO_SYS_CORE_BANK;
+
+    sysocbsi(ctx->cb, IDX_SYSGWINFO, &sysgwinfo, LEN_SYSGWINFO);
+
+    SYS_TREF;
+
+    return ERR_NONE; 
+
+}
+
+
+/* --------------------------------------------------------------------------------------------------------- */
+static int b000_csta_select(ctn2400_ctx_t   *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    int                 temp_seq = 0;  
+    ctarg_t             *ctarg;
+
+    SYS_TRST;
+
+    /*
+        (1) sta 테이블 extn_flag '9'이면서 host_flag '0'인경우
+        ==> 대외기관으로 부터 수신후 host로 전송해야 할 시점의 file인 경우
+        (2) sta 테이블 extn_flag '9'이면서 host_flag '5'인경우
+        ==> 선택송신을 client화면에서 조작할 경우
+        (3) sta 테이블 extn_flag '9'이면서 host_flag '3'인경우
+        ==> 송신하다가 정상종료가 되지않을 file을 재전송하는 경우에 해당됨
+    */
+    ctarg = (ctarg_t *) &ctx->ctarg;
+    memset(ctarg, 0x00, sizeof(ctarg_t));
+
+    if (g_ctinfo_cursor == 0){
+        EXEC SQL DECLARE CUR_CTARG_01 CURSOR FOR 
+                /* Decoupling 추가              */
+                SELECT 1 seq ,
+                       NVL(A.PROC_DATE, '           '),
+                       NVL(A.DATA_DATE, '           '),
+                       NVL(A.ITEM_NAME, '           '),
+                       NVL(A.VAN_ID, '  '),
+                       LTRIM(TO_CHAR(A.EXTN_LAST_NO, '0999999')),
+                       A.HOST_FLAG  
+                FROM   CTSTA A, CTINFO B 
+               WHERE   A.SR_TYPE        = 'S'
+                 AND   A.EXTN_FLAG      = '9'
+                 AND   A.HOST_FLAG      = '8'   // KTI 전송대상이 완료 된 경우 
+                 AND   A.VAN_ID        <> '997'
+                 AND   ((B.AP_COMM_FLAG BETWEEN '0' AND '9') OR B.AP_COMM_FLAG IN ('I', 'K'))
+                 AND   SUBSTR(A.ITEM_NAME,1,6) LIKE RTRIM(SUBSTR(B.ITEM_NAME,1,6)) || '%'
+                 AND   A.VAN_ID         = B.VAN_ID
+
+
+                UNION 
+                /* ============================================ */
+
+                SELECT 2 seq ,
+                       NVL(A.PROC_DATE, '           '),
+                       NVL(A.DATA_DATE, '           '),
+                       NVL(A.ITEM_NAME, '           '),
+                       NVL(A.VAN_ID, '  '),
+                       LTRIM(TO_CHAR(A.EXTN_LAST_NO, '0999999')),
+                       A.HOST_FLAG  
+                FROM   CTSTA A, CTINFO B 
+               WHERE   A.SR_TYPE        = 'S'
+                 AND   A.EXTN_FLAG      = '9'
+                 AND   A.HOST_FLAG      = '5' 
+                 AND   A.VAN_ID        <> '997'
+                 AND   ((B.AP_COMM_FLAG BETWEEN '0' AND '9') OR B.AP_COMM_FLAG IN ('I', 'K'))
+                 AND   SUBSTR(A.ITEM_NAME,1,6) LIKE RTRIM(SUBSTR(B.ITEM_NAME,1,6)) || '%'
+                 AND   A.VAN_ID         = B.VAN_ID
+
+               UNION 
+
+                SELECT 3 seq ,
+                       NVL(A.PROC_DATE, '           '),
+                       NVL(A.DATA_DATE, '           '),
+                       NVL(A.ITEM_NAME, '           '),
+                       NVL(A.VAN_ID, '  '),
+                       LTRIM(TO_CHAR(A.EXTN_LAST_NO, '0999999')),
+                       A.HOST_FLAG  
+                FROM   CTSTA A, CTINFO B 
+               WHERE   A.SR_TYPE        = 'S'
+                 AND   A.EXTN_FLAG      = '9'
+                 AND   A.HOST_FLAG      = '1' 
+                 AND   A.VAN_ID        <> '997'
+                 AND   ((B.AP_COMM_FLAG BETWEEN '0' AND '9') OR B.AP_COMM_FLAG IN ('I', 'K'))
+                 AND   SUBSTR(A.ITEM_NAME,1,6) LIKE RTRIM(SUBSTR(B.ITEM_NAME,1,6)) || '%'
+                 AND   A.VAN_ID         = B.VAN_ID
+
+                SELECT 4 seq ,
+                       NVL(A.PROC_DATE, '           '),
+                       NVL(A.DATA_DATE, '           '),
+                       NVL(A.ITEM_NAME, '           '),
+                       NVL(A.VAN_ID, '  '),
+                       LTRIM(TO_CHAR(A.EXTN_LAST_NO, '0999999')),
+                       A.HOST_FLAG  
+                FROM   CTSTA A, CTINFO B 
+               WHERE   A.SR_TYPE        = 'S'
+                 AND   A.EXTN_FLAG      = '9'
+                 AND   A.HOST_FLAG      = '0'
+                 AND   A.VAN_ID        <> '997'
+                 AND   ((B.AP_COMM_FLAG BETWEEN '0' AND '9') OR B.AP_COMM_FLAG IN ('I', 'K'))
+                 AND   SUBSTR(A.ITEM_NAME,1,6) LIKE RTRIM(SUBSTR(B.ITEM_NAME,1,6)) || '%'
+                 AND   A.VAN_ID         = B.VAN_ID
+
+               UNION 
+               
+                SELECT 5 seq ,
+                       NVL(A.PROC_DATE, '           '),
+                       NVL(A.DATA_DATE, '           '),
+                       NVL(A.ITEM_NAME, '           '),
+                       NVL(A.VAN_ID, '  '),
+                       LTRIM(TO_CHAR(A.EXTN_LAST_NO, '0999999')),
+                       A.HOST_FLAG  
+                FROM   CTSTA A, CTINFO B 
+               WHERE   A.SR_TYPE        = 'S'
+                 AND   A.EXTN_FLAG      = '9'
+                 AND   A.HOST_FLAG      = '3'
+                 AND   A.VAN_ID        <> '997'
+                 AND   ((B.AP_COMM_FLAG BETWEEN '0' AND '9') OR B.AP_COMM_FLAG IN ('I', 'K'))
+                 AND   SUBSTR(A.ITEM_NAME,1,6) LIKE RTRIM(SUBSTR(B.ITEM_NAME,1,6)) || '%'
+                 AND   A.VAN_ID         = B.VAN_ID
+                 ORDER BY seq 
+
+        EXEC SQL OPEN CUR_CTARG_01;
+
+        if (SYS_DB_CHK_FAIL){
+            db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s b000_csta_select():"
+                             "CURSOR OEPN(CTSTA, CTINFO) ERROR[%d] MSG[%s] ",
+                             __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+            return ERR_ERR;
+        }
+        
+        g_ctinfo_cursor = 1;
+    }
+    
+    EXEC SQL FETCH CUR_CTARG_01 
+             INTO   :temp_seq,
+                    :ctarg->proc_date,
+                    :ctarg->data_date,
+                    :ctarg->appl_name,
+                    :ctarg->van_id,
+                    :ctarg->host_last_no,
+                    :ctarg->host_sta_flag;
+    
+    if (SYS_DB_CHK_FAIL){
+        if (SYS_DB_CHK_NOTFOUND){
+            EXEC SQL CLOSE CUR_CTARG_01;
+            g_ctinfo_cursor = 0;
+            return ERR_ERR;
+        }else{
+            db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        }
 
     }
-}
-/* --------------------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------------------- */
+}   
 /* --------------------------------------------------------------------------------------------------------- */
 /* --------------------------------------------------------------------------------------------------------- */
 /* --------------------------------------------------------------------------------------------------------- */
