@@ -648,6 +648,154 @@ static int c100_ctmstr_select(ctn2400_ctx_t *ctx)
     ctmstr_t            ctmstr;
     ctarg_t             *ctarg;
     cthlay_t            cthlay;
+
+    SYS_TRST;
+
+    ctarg  = (ctarg_t  *) &ctx->ctarg;  
+    cthlay = (cthlay_t *) &ctx->cthlay;
+
+    /* ------------------------------------------ */
+    /* van_id, 처리일자, item_appl_name set         */
+    /* ------------------------------------------ */
+    memset(cthlay, 0x20, sizeof(cthlay_t));
+    memcpy(cthlay->proc_date,      ctarg->data_date, LEN_CTHLAY_PROC_DATE);
+    memcpy(cthlay->van_type ,      ctarg->van_id[1], LEN_CTHLAY_VAN_TYPE );
+    memcpy(cthlay->item_appl_name, ctarg->appl_name, LEN_CTHLAY_ITEM_APPL_NAME);
+    SYS_DBG(" ===================================================== ");
+    SYS_DBG("             CTMSTR    DATA VALUE CHECK                ");
+    SYS_DBG(" ===================================================== ");
+    SYS_DBG(" ctarg->proc_date        = [%.8s]", ctarg->proc_date    );
+    SYS_DBG(" ctarg->data_date        = [%.8s]", ctarg->data_date    );
+    SYS_DBG(" ctarg->appl_name        = [%.8s]", ctarg->appl_name    );
+    SYS_DBG(" ctarg->van_id           = [%.3s]", ctarg->van_id       );
+    SYS_DBG(" ctarg->host_last_no     = [%.7s]", ctarg->host_last_no );
+    SYS_DBG(" ctarg->blk_no           = [%.4s]", ctarg->blk_no       );
+    SYS_DBG(" ctarg->seq_no           = [%.3s]", ctarg->seq_no       );
+    SYS_DBG(" ===================================================== ");
+
+    if ((memcmp(ctarg->blk_no, "0000", LEN_CTARG_BLK_NO) == 0) &&
+        (memcmp(ctarg->seq_no, "000" , LEN_CTARG_SEQ_NO) == 0)) {
+        
+        /* --------------------------------------------------- */
+        /* 테이블 변수 set                                       */
+        /* --------------------------------------------------- */
+        memset(&ctmstr, 0x00, sizeof(cthlay_t));
+        memcpy(ctmstr.proc_date,   ctarg->proc_date, LEN_CTHLAY_PROC_DATE);
+        memcpy(ctmstr.data_date,   ctarg->data_date, LEN_CTHLAY_DATA_DATE);
+        memcpy(ctmstr.van_id,      ctarg->van_id,    LEN_CTHLAY_VAN_ID);
+        memcpy(ctmstr.item_name,   ctarg->appl_name, LEN_CTHLAY_ITEM_NAME);
+        utortrim(ctmstr.item_name);
+
+        /* -------------------------------------------------------------- */
+        SYS_DBG(" ctmstr.proc_date        = [%.8s]", ctmstr.proc_date    );
+        SYS_DBG(" ctmstr.data_date        = [%.8s]", ctmstr.data_date    );
+        SYS_DBG(" ctmstr.item_name        = [%.8s]", ctmstr.item_name    );
+        SYS_DBG(" ctmstr.van_id           = [%.3s]", ctmstr.van_id       );        
+        /* -------------------------------------------------------------- */
+
+        /* 실data */
+        EXEC SQL DECLARE CTMSTR_CUR_1 CURSOR FOR 
+                SELECT NVL(BLK_NO, 0),
+                       NVL(SEQ_NO, 0),
+                       NVL(REC_CNT, 0),
+                       NVL(FILE_SIZE, 0),
+                       DETL_DATA
+                FROM   CTMSTR  
+                WHERE  PROC_DATE = :ctmstr.proc_date
+                AND    DATA_DATE = :ctmstr.data_date
+                AND    VAN_ID    = :ctmstr.van_id
+                AND    ITEM_NAME = :ctmstr.item_name
+                ORDER BY BLK_NO, SEQ_NO;
+
+        EXEC SQL OPEN CTMSTR_CUR_1;
+
+        if (SYS_DB_CHK_FAIL) {
+            db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s c100_ctmstr_select(): "
+                                 "data ctmstr select ERR[%d]item_name[%s]"
+                                 "담당자 확인! MSG[%s]",
+                                 __FILE__, SYS_DB_ERRORNUM,
+                                 ctmstr.item_name, SYS_DB_ERRORSTR );
+            return ERR_ERR;
+        }
+
+        g_ctmstr_cursor = 1;
+    }
+    
+    /* -------------------------------------------------------------- */
+    /* 수신정보  FETCH                                                  */
+    /* -------------------------------------------------------------- */
+    memset(&ctmstr, 0x00, sizeof(ctmstr_t));
+    EXEC SQL FETCH CTMSTR_CUR_1
+            INTO :ctmstr.blk_no,
+                 :ctmstr.seq_no,
+                 :ctmstr.rec_cnt,
+                 :ctmstr.file_size,
+                 :ctmstr.detl_data;
+    
+    if (SYS_DB_CHK_FAIL){
+        if (SYS_DB_CHK_NOTFOUND){
+            if ((memcmp(ctarg->blk_no, "0000", LEN_CTARG_BLK_NO) == 0) &&
+                (memcmp(ctarg->seq_no,  "000", LEN_CTARG_SEQ_NO) == 0)){
+                db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+                ex_syslog(LOG_ERROR, "[APPL_DM] %s c100_ctmstr_select(): "
+                                    "FETCH(CTMSTR) 원장정보가 존재하지 않습니다.[%d]"
+                                    "담당자 확인! MSG[%s]",
+                                    __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR );
+                c200_ctmst_curosr_close(ctx);
+                return ERR_ERR;
+            }
+            else{
+                SYS_DBG("더이상 정보가 존재하지 않습니다. ");
+                c200_ctmst_curosr_close(ctx);
+                return ERR_ERR;
+            }
+        }
+        else{
+            db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s c100_ctmstr_select(): "
+                                "FETCH(CTMSTR) ERR[%d]"
+                                "담당자 확인! MSG[%s]",
+                                __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR );
+            c200_ctmst_curosr_close(ctx);
+            return ERR_ERR;
+        }
+
+    }
+
+    /* -------------------------------------------------------------- */
+    /* 조회정보 DATA SET                                                */
+    /* -------------------------------------------------------------- */
+    utol2an(ctmstr.blk_no,     LEN_CTHLAY_BLOCK_NO,    cthlay->block_no);
+    utol2an(ctmstr.seq_no,     LEN_CTHLAY_SEQ_NO,      cthlay->seq_no  );
+    utol2an(ctmstr.rec_cnt,    LEN_CTHLAY_REC_CNT,     cthlay->rec_cnt );
+    /* 20080202 wizkim - cthlay_t에서 file_size 필드가 존재하지 않음       */
+    /* rec_size에 file_size를 넣을 것 같음....                           */
+    utol2an(ctmstr.file_size,  LEN_CTHLAY_REC_SIZE,    cthlay->rec_size);
+
+    memset(cthlay->detl_data,  0x20,  LEN_CTHLAY_DETL_DATA);
+    memcpy(cthlay->detl_data,  ctmstr.detl_data, strlen(ctmstr.detl_data));
+    
+    /* -------------------------------------------------------------- */
+    /* 블럭번호 및 일련번호 CTARG SET                                      */
+    /* -------------------------------------------------------------- */
+    memcpy(ctarg->blk_no, cthlay->block_no,   LEN_CTARG_BLK_NO);
+    memcpy(ctarg->seq_no, cthlay->seq_no,     LEN_CTARG_SEQ_NO);
+
+    SYS_DBG(" ===================================================== ");
+    SYS_DBG("             CTMSTR FETCH   DATA                       ");
+    SYS_DBG(" ===================================================== ");
+    SYS_DBG(" ctmstr.proc_date        = [%.4s]", ctmstr.proc_date    );
+    SYS_DBG(" ctmstr.data_date        = [%.3s]", ctmstr.data_date    );
+    SYS_DBG(" ctmstr.rec_cnt          = [%.6s]", ctmstr.rec_cnt      );
+    SYS_DBG(" ctmstr.file_size        = [%.6s]", ctmstr.file_size    );
+    SYS_DBG(" ctmstr.detl_area        = [%.100s]", ctmstr.detl_data  );
+    SYS_DBG(" ===================================================== ");
+    
+    SYS_TREF;
+
+    return ERR_ERR;
+
 }
 /* --------------------------------------------------------------------------------------------------------- */
 /* --------------------------------------------------------------------------------------------------------- */
