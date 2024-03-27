@@ -1069,7 +1069,301 @@ static int e000_ctsta_select(ctn2400_ctx_t  *ctx)
     }
 
     EXEC SQL FETCH CUR_CTARG_02;
+             INTO :temp_seq,
+                  :ctarg_kti->proc_date,
+                  :ctarg_kti->data_date,
+                  :ctarg_kti->appl_name,
+                  :ctarg_kti->van_id,
+                  :ctarg_kti->host_last_no,
+                  :ctarg_kti->host_sta_flag;
 
+    if (SYS_DB_CHK_FAIL){
+        if (SYS_DB_CHK_NOTFOUND){
+            EXEC SQL CUR_CTARG_02;
+            g_ctinfo_cursor_kti = 0;
+            return ERR_ERR;
+        }
+        else{
+            db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s b000_csta_select():"
+                                 "FETCH(CSTA,CTINFO) ERROR [%d]MSG[%s]",
+                                 __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+            EXEC SQL CUR_CTARG_02;
+            g_ctinfo_cursor_kti = 0;
+            return ERR_ERR;
+        }
+    }
+
+    ctarg_kti->sr_type[0] = 'S';
+    memset(ctarg_kti->blk_no, '0', LEN_CTARG_BLK_NO);
+    memset(ctarg_kti->seq_no, '0', LEN_CTARG_SEQ_NO);
+    SYS_DBG(" ===================================================== ");
+    SYS_DBG("              FETCH   DATA                             ");
+    SYS_DBG(" ===================================================== ");
+    SYS_DBG(" ctarg_kti->proc_date        = [%.4s]", ctarg_kti->proc_date    );
+    SYS_DBG(" ctarg_kti->data_date        = [%.8s]", ctarg_kti->data_date    );
+    SYS_DBG(" ctarg_kti->appl_name        = [%.8s]", ctarg_kti->appl_name    );
+    SYS_DBG(" ctarg_kti->van_id           = [%.3s]", ctarg_kti->van_id       );
+    SYS_DBG(" ctarg_kti->host_last_no     = [%.7s]", ctarg_kti->host_last_no );
+    SYS_DBG(" ctarg_kti->host_sta_flag    = [%.1s]", ctarg_kti->host_sta_flag);
+    SYS_DBG(" ===================================================== ");
+    
+    SYS_TREF;
+
+    return ERR_ERR;
+}
+
+
+/* --------------------------------------------------------------------------------------------------------- */
+/* Decoupling 추가                                                                                            */
+/* --------------------------------------------------------------------------------------------------------- */
+static int f000_data_send_proc(ctn2400_ctx_t    *ctx)
+{
+    int                 rc = ERR_NONE;
+    int                 i;
+    cti0026x_t          cti0026x;
+    cti0030f_t          cti0030f;
+    ctarg_t             ctarg_kti;
+    cthlay_t            cthlay_kti;
+
+    SYS_TRST;
+
+    ctarg_kti  = (ctarg_t *)    &ctx->ctarg_kti;
+    cthlay_kti = (cthlay_kti *) &ctx->cthlay_kti;
+
+    memcpy(ctarg_kti->max_block_no, "0000", LEN_CTARG_MAX_BLOCK_NO);
+    memcpy(ctarg_kti->max_seq_no  ,  "000", LEN_CTARG_MAX_SEQ_NO);
+
+    g_kti_send_cnt = 0;
+    g_kti_temp_cnt = 0;
+
+    /* 전송할 데이터가 존재시 */
+    while(1) {
+        tpschedule(-1);
+
+        /* ------------------------------ */
+        /* 수신원장 dbio call               */
+        /* ------------------------------ */
+        rc = f100_ctmstr_select(ctx);
+
+        if (rc == ERR_NFD) {
+            break;
+        }
+
+        if (rc == ERR_ERR) {
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_data_send_proc():"
+                                 "대외계->KTI 송신 :원장검색오류 "
+                                 "proc_date[%.8s]van_type[%.2s]item_appl_name[%.8s]"
+                                 "[해결방안] 업무담당자 CALL",
+                                 __FILE__, cthlay_kti->proc_date,
+                                  cthlay_kti->van_id, cthlay_kti->item_appl_name);
+            //f300_ctsta_update(ctx, 4);
+            return ERR_ERR;
+        }
+
+        /* ----------------------------------------------------------- */
+        /* KTI로 송신 시작                                                */
+        /* ----------------------------------------------------------- */
+        if ((memcmp(cthlay_kti->block_no, "0000", LEN_CTHLAY_BLOCK_NO) == 0) &&
+            (memcmp(cthlay_kti->seq_no,    "000", LEN_CTHLAY_SEQ_NO)   == 0)){
+            /* rc = f300_ctsta_update(ctx, 2);
+              if ( rc == ERR_ERR){
+                f200_ctmstr_cursor_close(ctx);
+                 ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_data_send_proc():"
+                                 상태테이블 UPDATE ERROR]", __FILE__);
+                return ERR_ERR;
+              }*/
+        }
+        memcpy(cthlay_kti->data_date, ctarg_kti->data_date, LEN_CTHLAY_DATA_DATE);
+
+        /* ----------------------------------------------------------- */
+        /* 전문송신 및 응답처리                                             */
+        /* ----------------------------------------------------------- */
+        rc = w000_make_kti_s_file(ctx);
+        if (rc == ERR_ERR) {
+            f200_ctmstr_cursor_close(ctx);
+            //f300_ctsta_update(ctx, 4);
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_data_send_proc():"
+                                 "대외계->KTI 송신 :file 처리 오류 "
+                                 "proc_date[%.8s]van_type[%.2s]item_appl_name[%.8s]"
+                                 "[해결방안] 업무담당자 CALL",
+                                 __FILE__, cthlay_kti->proc_date,
+                                  cthlay_kti->van_id, cthlay_kti->item_appl_name);
+            return ERR_ERR;
+        }
+
+        /* ----------------------------------------------------------- */
+        /* KTI로 송신 종료                                               */
+        /* ----------------------------------------------------------- */
+        if (g_kti_temp_cnt = g_kti_send_cnt){
+            rc = f300_ctsta_update(ctx, 8);
+            if (rc == ERR_ERR){
+                f200_ctmstr_cursor_close(ctx);
+                ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_data_send_proc():"
+                                     "상태테이블(CTSTA) UPDATE ERR: 8 ", __FILE__);
+                return ERR_ERR;
+            }
+        }
+    } //while loop end 
+    /*  CURSOR Close 하지 않으면 close */
+    f200_ctmstr_cursor_close(ctx);
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
+
+/* --------------------------------------------------------------------------------------------------------- */
+/* Decoupling 추가                                                                                            */
+/* --------------------------------------------------------------------------------------------------------- */
+static int f100_ctmstr_select(ctn2400_ctx_t *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    int                 cnt = 0;
+
+    ctmstr_t            ctmstr;
+    ctarg_t             *ctarg_kti;
+    cthlay_t            *cthlay_kti;
+
+    SYS_TRST;
+
+    ctarg_kti   = (ctarg_t  *) &ctx->ctarg_kti;
+    cthlay_kti  = (cthlay_t *) &ctx->cthlay_kti;
+
+    /* ------------------------------------------------------------ */
+    /* van_id, 처리일자, item_appl_name set                           */
+    /* ------------------------------------------------------------ */
+    memset(cthlay_kti, 0x20, sizeof(cthlay_t));
+    memcpy(cthlay_kti->proc_date,       ctarg_kti->data_date,  LEN_CTHLAY_PROC_DATE);
+    memcpy(cthlay_kti->van_type,        &ctarg_kti->van_id[1], LEN_CTHLAY_VAN_TYPE );
+    memcpy(cthlay_kti->item_appl_name,  ctarg_kti->appl_name,  LEN_CTHLAY_ITEM_APPL_NAME);
+    SYS_DBG(" ===================================================== ");
+    SYS_DBG("              FETCH   DATA                             ");
+    SYS_DBG(" ===================================================== ");
+    SYS_DBG(" ctarg_kti->proc_date        = [%.8s]", ctarg_kti->proc_date    );
+    SYS_DBG(" ctarg_kti->data_date        = [%.8s]", ctarg_kti->data_date    );
+    SYS_DBG(" ctarg_kti->appl_name        = [%.8s]", ctarg_kti->appl_name    );
+    SYS_DBG(" ctarg_kti->van_id           = [%.3s]", ctarg_kti->van_id       );
+    SYS_DBG(" ctarg_kti->host_last_no     = [%.7s]", ctarg_kti->host_last_no );
+    SYS_DBG(" ctarg_kti->blk_no           = [%.4s]", ctarg_kti->blk_no       );
+    SYS_DBG(" ctarg_kti->seq_no           = [%.3s]", ctarg_kti->seq_no       );
+    SYS_DBG(" ===================================================== ");
+
+        if ((memcmp(ctarg_kti->blk_no,   "0000", LEN_CTARG_BLK_NO) == 0) &&
+            (memcmp(ctarg_kti->seq_no,    "000", LEN_CTARG_SEQ_NO) == 0)){
+
+            /* ------------------------------------------------------------ */
+            /* 테이블 변수  set                                               */
+            /* ------------------------------------------------------------ */
+            memset(&ctmstr, 0x20, sizeof(ctmstr_t));
+            memcpy(ctmstr.proc_date,       ctarg_kti->proc_date,  LEN_CTMSTR_PROC_DATE);
+            memcpy(ctmstr.data_date,       ctarg_kti->data_date,  LEN_CTMSTR_DATA_DATE);
+            memcpy(ctmstr.van_id,          ctarg_kti->van_id   ,  LEN_CTMSTR_VAN_ID   );
+            memcpy(ctmstr.item_name,       ctarg_kti->appl_name,  LEN_CTMSTR_ITEM_NAME);
+            utortrim(ctmstr.item_name);
+
+            /*-----------------------------------------------------------------------*/
+            SYS_DBG(" ctmstr.proc_date        = [%.8s]", ctmstr.proc_date    );
+            SYS_DBG(" ctmstr.data_date        = [%.8s]", ctmstr.data_date    );
+            SYS_DBG(" ctmstr.appl_name        = [%.8s]", ctmstr.appl_name    );
+            SYS_DBG(" ctmstr.van_id           = [%.3s]", ctmstr.van_id       );
+            /*-----------------------------------------------------------------------*/
+
+            EXEC SQL SELECT count(*)
+                 INTO   :cnt
+                 FROM   CTMSTR
+                WHERE   PROC_DATE = :ctmstr.proc_date
+                  AND   DATA_DATE = :ctmstr.data_date
+                  AND   VAN_ID    = :ctmstr.van_id
+                  AND   ITEM_NAME = :ctmstr.item_name;
+
+            if (SYS_DB_CHK_SUCCESS) {
+                db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+                ex_syslog(LOG_ERROR, "[APPL_DM] %.7s ar_jrnkti_create: INSERT(ARJRNKTI)%d"
+                                     "[해결방안] ORACLE 시스템 담당자 CALL MSG %s",
+                                    __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+                return ERR_ERR;
+            }
+
+            g_kti_send_cnt = 0;
+
+            SYS_DBG("g_kti_send_cnt = [%d]", g_kti_send_cnt);
+
+            g_kti_temp_cnt = 0;
+
+            /* 실DATA */
+            EXEC SQL DECLARE CTMSTR_CUR_2 CURSOR FOR 
+                    SELECT  NVL(BLK_NO,    0),
+                            NVL(SEQ_NO,    0),
+                            NVL(REC_CNT,   0),
+                            NVL(FILE_SIZE, 0),
+                            DETL_DATA
+                      FROM  CTMSTR
+                      WHERE PROC_DATE = :ctmstr.proc_date
+                      AND   DATA_DATE = :ctmstr.data_date
+                      AND   VAN_ID    = :ctmstr.van_id
+                      AND   ITEM_NAME = :ctmstr.item_name
+                      ORDER BY BLK_NO, SEQ_NO;
+
+            EXEC SQL OPEN CTMSTR_CUR_2;
+
+            if (SYS_DB_CHK_FAIL){
+                db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+                ex_syslog(LOG_ERROR, "[APPL_DM] %s f100_ctmstr_select ()"
+                                     "data ctmstr select ERR[%d] item_name[%s]"
+                                     "담당자 확인!  MSG %s",
+                                    __FILE__, SYS_DB_ERRORNUM,
+                                    ctmstr.item_name, SYS_DB_ERRORSTR);
+                return ERR_ERR;
+            }
+
+            g_ctmst_cursor_kti = 1;
+        }
+
+        /* ------------------------------------------------------------ */
+        /* 수신정보 Fetch                                                 */
+        /* ------------------------------------------------------------ */
+        memset(&ctmstr, 0x00, sizeof(ctmstr_t));
+        EXEC SQL FETCH CTMSTR_CUR_2 
+                INTO  :ctmstr.blk_no,
+                      :ctmstr.seq_no,
+                      :ctmstr.rec_cnt,
+                      :ctmstr.file_size,
+                      :ctmstr.detl_data;
+
+        if (SYS_DB_CHK_FAIL){
+            if (SYS_DB_CHK_NOTFOUND){
+                if ((memcmp(ctarg_kti->blk_no,  "0000", LEN_CTARG_BLK_NO) == 0) &&
+                    (memcmp(ctarg_kti->seq_no,   "000", LEN_CTARG_SEQ_NO) == 0)){
+                    db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+                    ex_syslog(LOG_ERROR, "[APPL_DM] %s f100_ctmstr_select():"
+                                        "FETCH(CTMSTR) ERROR [%d]MSG[%s]",
+                                        __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+                    f200_ctmstr_cursor_close(ctx);
+                    return ERR_ERR;
+                }
+                else{
+                    SYS_DBG("더이상 원장 정보가 존재 하지 않습니다. ");
+                    f200_ctmstr_cursor_close(ctx);
+                    return ERR_NFD;
+                }
+            }
+            else{
+                db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+                ex_syslog(LOG_ERROR, "[APPL_DM] %s f100_ctmstr_select():"
+                                    "FETCH(CTMSTR) ERROR [%d]MSG[%s]",
+                                    __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+                f200_ctmstr_cursor_close(ctx);
+                return ERR_ERR;
+            }
+        }
+
+        /* ------------------------------------------------------------ */
+        /* 조회정보 DATA SET                                              */
+        /* ------------------------------------------------------------ */
+        
 }
 /* --------------------------------------------------------------------------------------------------------- */
 /* --------------------------------------------------------------------------------------------------------- */
