@@ -798,6 +798,83 @@ static int c100_ctmstr_select(ctn2400_ctx_t *ctx)
 
 }
 /* --------------------------------------------------------------------------------------------------------- */
+static int c200_ctmst_curosr_close(ctn2400_ctx_t    *ctx)
+{
+
+    int                 rc = ERR_NONE;
+
+    ctarg_t             *ctarg;
+
+    ctarg  = (ctarg_t  *) &ctx->ctarg;
+
+    if (g_ctmst_cursor == 1){
+        EXEC SQL CLOSE CTMSTR_CUR_1;
+        g_ctmst_cursor = 0;
+    }
+
+    /* -------------------------------------------------------------- */
+    /* 블럭번호 및 일련번호 RESET                                         */
+    /* -------------------------------------------------------------- */
+    memset(ctarg->blk_no,   '0',    LEN_CTARG_BLK_NO);
+    memset(ctarg->seq_no,   '0',    LEN_CTARG_SEQ_NO);
+
+    return ERR_NONE;
+
+}
+
 /* --------------------------------------------------------------------------------------------------------- */
+static int c300_csta_update(ctn2400_ctx_t   *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    cti0030f_t          cti0030f;
+    ctarg_t             *ctarg;
+
+    ctarg   = (ctarg_t  *) &ctx->ctarg;
+    memset(&cti0030f, 0x00, sizeof(cti0030f_t));
+    cti0030f.in.ctarg   = ctarg; 
+    cti0030f.in.i_flag  = host_sta_flag;
+
+    rc = cto0030f(&cti0030f);
+    if (rc == ERR_ERR){
+        c200_ctmst_curosr_close(ctx);
+        return ERR_ERR;
+    }
+
+    return ERR_NONE;
+}
+
+
 /* --------------------------------------------------------------------------------------------------------- */
+static int v000_gw_call(ctn2400_ctx_t   *ctx, int rspn_flag)
+{
+
+    int                 rc = ERR_NONE;
+    char                *ptr;
+    commbuff_t          dcb;
+    sysgwinfo_t         *sysgwinfo;
+
+    int                 retry_cnt 10;
+
+    SYS_TRST;
+
+    /* -------------------------------------------------------------- */
+    SYS_DBG(" ====================  전송시작 ======================== ");
+    SYS_DBG(" v000_gw_call: rspn_flag = [%d]"    , rspn_flag          );
+    SYS_DBG(" v000_gw_call: send_len  = [%d]"    , ctx->host_send_len );
+    SYS_DBG(" v000_gw_call: send_data = [%.100s]", ctx->host_send_data);
+    /* -------------------------------------------------------------- */
+
+    memset(&dcb, 0x00, sizeof(commbuff_t));
+    rc = sysocbdb(ctx->cb, &dcb);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s v000_gw_call(): "
+                             "COMMBUFF BACKUP ERROR"
+                             "[해결방안]일괄전송 담당자 CALL",
+                            __FILE__ );
+        sysocbfb(&dcb);
+        return ERR_ERR;
+    }
+    
+}
 /* --------------------------------------------------------------------------------------------------------- */
