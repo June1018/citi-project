@@ -875,6 +875,84 @@ static int v000_gw_call(ctn2400_ctx_t   *ctx, int rspn_flag)
         sysocbfb(&dcb);
         return ERR_ERR;
     }
-    
+
+    rc = sysocbsi(&dcb, IDX_HOSTSENDDATE, ctx->host_send_data, ctx->host_send_len);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s v000_gw_call(): "
+                             "COMMBUFF(HOSTSENDDATA)SET ERROR"
+                             "[해결방안]일괄전송 담당자 CALL",
+                            __FILE__ );
+        sysocbfb(&dcb);
+        return ERR_ERR; 
+    }
+
+    /* 대외기관 G/W에 호출하는 방식을 전달하기 위한값 set */
+    sysgwinfo = (sysgwinfo_t *) sysocbgp(&dcb , IDX_SYSGWINFO);
+    sysgwinfo->time_val = 60;
+    sysgwinfo->msg_type = SYSGWINFO_MSG_ETC;            /* MSG구분 */
+
+    if (rspn_flag == 1)
+        sysgwinfo->call_type = SYSGWINFO_CALL_TYPE_IR;  /* IR방식으로 호출 */
+        sysgwinfo->rspn_flag = SYSGWINFO_SVC_REPLY;     /* SVC로부터 응답  */
+    }
+    else{
+        sysgwinfo->call_type = SYSGWINFO_CALL_TYPE_SAF; /* SAF방식으로 호출 */
+        sysgwinfo->rspn_flag = SYSGWINFO_REPLY;     /* G/W로부터 응답  */
+    }
+
+    /* 대외기관 DATA 전송 */
+    while(1){
+
+            //rc = sys_tpacall("SYSFTPHTSEND", &dcb, 0);
+            #if define(SYS_DIRECT_SWAP)
+                char ch_flag [2];
+                memset(ch_flag, 0x00, 2);
+                EXEC SQL SELECT OUT_BOUND_FLAG
+                           INTO :ch_flag
+                           FROM TRANS_DIRECT
+                          WHERE APPL_CODE = '091';
+                if (SYS_DB_CHK_FAIL) {
+                    db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+                    ex_syslog(LOG_ERROR, "[CLIENT_DM] %s() : v000_gw_call(): "
+                                        "SELECT (TRANS_DIRECT) %d %s"
+                                       ,  __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR );
+                    SYS_HSTERR(SYS_NN, SYS_GENERR, "[%d]TRANS_DIRECT SELECT ERROR",
+                               SYS_DB_ERRORNUM);
+                    return ERR_ERR; 
+                }
+
+                if (ch_flag[0] == '0'){
+                    rc = sys_tpacall("SYFTPHTSEND", &dcb, 0);
+                }else{
+                    rc = sys_tpacall("SYFTSIT2TSEND", &dcb, 0);
+                }
+            #else   
+                sys_tpacall("SYFTPHTSEND", &dcb, 0);
+            #endif
+
+            if (rc == ERR_ERR){
+                break;
+            }
+            else{
+                if (retry_cnt > 0){
+                    retry_cnt++;
+
+                    SYS_DBG(">> SYS TPCALL ERR : retry_cnt[%d], SYSFTPHTSEND 서비스 호출 ERROR[%d:%d] - wait 60sec",
+                                    3 - retry_cnt, tperrno, sys_err_code());
+                    SYS_DBG("%d 번째 재전송 : send_len = [%d]"      , 3 - retry_cnt, ctx->host_send_len );
+                    SYS_DBG("%d 번째 재전송 : send_data = [%.200s]" , 3 - retry_cnt, ctx->host_send_data);
+
+                    sleep(60);
+                    continue;
+                }
+                else if( retry_cnt <=0 ){
+                    
+                }
+            }
+
+
+    }
+
+
 }
 /* --------------------------------------------------------------------------------------------------------- */
