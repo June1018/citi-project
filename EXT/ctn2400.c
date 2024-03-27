@@ -946,13 +946,130 @@ static int v000_gw_call(ctn2400_ctx_t   *ctx, int rspn_flag)
                     continue;
                 }
                 else if( retry_cnt <=0 ){
-                    
+                    ex_syslog(LOG_ERROR,  "[APPL_DM]%s v000_gw_call ():"
+                                          " SYFTPHTSEND 서비스 호출 ERROR[%d:%d]" 
+                                          "[해결방안] 일괄전송 담당자 CALL",
+                                          __FILE__, tperrno, sys_err_code());
+                    sysocbfb(&dcb);
+                    return ERR_ERR;
                 }
             }
+        }
 
+        /* 수신받은 자료를 ctx 변수에 옮겨담는다. */
+        ctx->host_recv_len = sysocbgp(&dcb, IDX_SYSIOUTQ);
+        ptr = sysocbgp(&dcb, IDX_SYSIOUTQ);
+        memcpy(ctx->host_recv_data, ptr, ctx->host_recv_len);
 
-    }
+        /* -------------------------------------------------------------- */
+        SYS_DBG("v000_gw_call : recv_len [%d]"      , ctx->host_recv_len );
+        SYS_DBG("v000_gw_call : recv_datn [%.100s]" , ctx->host_recv_data);
+        /* -------------------------------------------------------------- */
 
+        sysocbfb(&dcb);
+
+        return ERR_NONE;
 
 }
+
+
+/* --------------------------------------------------------------------------------------------------------- */
+/* Decoupling 추가                                                                                            */
+/* --------------------------------------------------------------------------------------------------------- */
+static int e000_ctsta_select(ctn2400_ctx_t  *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    int                 temp_seq = 0;
+    ctarg_t             ctarg_kti;
+
+    SYS_TRST;
+
+    /* ================================================================================================== */
+    /*   * ctinfo host_send_flag = 2인경우 NDM을 통해 KTI전송                                                 */
+    /*   1. stacta 테이블 extn_flag '9'이면서 host_flag '0'인경우                                             */                                       
+    /*   ==> 대외기관으로 부터 수신후 KTI로 전송해야 할 시점의 file인 경우                                           */
+    /*   2. sta 테이블 extn_flag '9'이면서 host_flag '2'인경우                                                */
+    /*   ==> 송신하다가 정상종료가 되지 않을 화일을 재전송하는 경우에 해당함                                            */
+    /*   3. sta 테이블 extn_flag '9'이면서 host_flag '4'인경우                                                */
+    /*   ==> 송신하다가 오류가 발생한 경우 재전송하는 경우에 해당됨.                                                  */
+    /* ================================================================================================== */
+    ctarg_kti = (ctarg_t *) &ctx->ctarg_kti;
+    memset(ctarg_kti, 0x00, sizeof(ctarg_t));
+
+    if (g_ctinfo_cursor_kti == 0){
+        EXEC SQL DECLARE CUR_CTARG_02 CURSOR FOR
+                SELECT 1 seq, 
+                       NVL(A.PROC_DATE, '           '),
+                       NVL(A.DATA_DATE, '           '),
+                       NVL(A.ITEM_NAME, '           '),
+                       NVL(A.VAN_ID, '  '),
+                       LTRIM(TO_CHAR(A.EXTN_LAST_NO, '0999999')),
+                       A.HOST_FLAG  
+                FROM   CTSTA A, CTINFO B 
+               WHERE   A.SR_TYPE        = 'S'
+                 AND   A.EXTN_FLAG      = '9'
+                 AND   A.HOST_FLAG      = '0'   
+                 AND   A.VAN_ID        <> '997'
+                 AND   B.HOST_SEND_FLAG = '2'
+                 AND   ((B.AP_COMM_FLAG BETWEEN '0' AND '9') OR B.AP_COMM_FLAG IN ('I', 'K'))
+                 AND   SUBSTR(A.ITEM_NAME,1,6) LIKE RTRIM(SUBSTR(B.ITEM_NAME,1,6)) || '%'
+                 AND   A.VAN_ID         = B.VAN_ID
+
+                UNION 
+
+                SELECT 2 seq ,
+                       NVL(A.PROC_DATE, '           '),
+                       NVL(A.DATA_DATE, '           '),
+                       NVL(A.ITEM_NAME, '           '),
+                       NVL(A.VAN_ID, '  '),
+                       LTRIM(TO_CHAR(A.EXTN_LAST_NO, '0999999')),
+                       A.HOST_FLAG  
+                FROM   CTSTA A, CTINFO B 
+               WHERE   A.SR_TYPE        = 'S'
+                 AND   A.EXTN_FLAG      = '9'
+                 AND   A.HOST_FLAG      = '2' 
+                 AND   A.VAN_ID        <> '997'
+                 AND   B.HOST_SEND_FLAG = '2'
+                 AND   ((B.AP_COMM_FLAG BETWEEN '0' AND '9') OR B.AP_COMM_FLAG IN ('I', 'K'))
+                 AND   SUBSTR(A.ITEM_NAME,1,6) LIKE RTRIM(SUBSTR(B.ITEM_NAME,1,6)) || '%'
+                 AND   A.VAN_ID         = B.VAN_ID
+
+               UNION 
+
+                SELECT 3 seq ,
+                       NVL(A.PROC_DATE, '           '),
+                       NVL(A.DATA_DATE, '           '),
+                       NVL(A.ITEM_NAME, '           '),
+                       NVL(A.VAN_ID, '  '),
+                       LTRIM(TO_CHAR(A.EXTN_LAST_NO, '0999999')),
+                       A.HOST_FLAG  
+                FROM   CTSTA A, CTINFO B 
+               WHERE   A.SR_TYPE        = 'S'
+                 AND   A.EXTN_FLAG      = '9'
+                 AND   A.HOST_FLAG      = '4' 
+                 AND   A.VAN_ID        <> '997'
+                 AND   B.HOST_SEND_FLAG = '2'
+                 AND   ((B.AP_COMM_FLAG BETWEEN '0' AND '9') OR B.AP_COMM_FLAG IN ('I', 'K'))
+                 AND   SUBSTR(A.ITEM_NAME,1,6) LIKE RTRIM(SUBSTR(B.ITEM_NAME,1,6)) || '%'
+                 AND   A.VAN_ID         = B.VAN_ID
+                ORDER BY seq;
+
+        EXEC SQL OPEN CUR_CTARG_02;
+
+        if (SYS_DB_CHK_FAIL){
+            db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s b000_csta_select():"
+                                 "CURSOR OPEN(CSTA,CTINFO) ERROR [%d]MSG[%s]",
+                                 __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+            return ERR_ERR;
+        }
+
+        g_ctinfo_cursor_kti = 1;
+    }
+
+    EXEC SQL FETCH CUR_CTARG_02;
+
+}
+/* --------------------------------------------------------------------------------------------------------- */
 /* --------------------------------------------------------------------------------------------------------- */
