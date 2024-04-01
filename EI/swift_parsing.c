@@ -708,46 +708,33 @@ static int b000_test(main_sample_ctx_t *ctx)
 
     for (i = 0; i < strlen(mt103_text); i++){
         temp_buff[j++] = input_stream[i];
-
+        chk = 0;
         /* new line check */
         if (input_stream[i] == '\n') {
-            if (chk = REFERENCE_NO) {
-                if (memcmp(temp_buff, ":21:", 4) == 0){
-                    /* MT202전문 */
-                    MT = MT202;
-                }
-                else if (memcmp(temp_buff, ":32A:", 5) == 0){
-                    /* MT100전문 */
-                    MT = MT100;
-                }else if (memcmp(temp_buff, ":23B:", 5) == 0){
-                    /* MT103(MT100 동일처리)전문 */
-                    MT = MT103;
-                }else{
-                    /* --------------------------------------------------- */
-                    SYS_HSTERR(SYS)LN, SYS_GENERR, "MQ FORMAT NOT FOUND ");
-                    /* --------------------------------------------------- */
-                    SYS_TREF;
-                    return ERR_NONE;
-                }
-            } /* REFERENCE_NO end if */
-            /* MQ 데이터 parsing : pcmqutil.pc 라이브러리 call */
-            mt103_data_parsing(&mt103, temp_buff, chk, MT103);
-            chk = 0;
+            /* 수취계좌 & 수치인명 */
+            if (memcmp(temp_buff, ":59:/", 5) == 0) {
+                SYS_DBG("b000_test temp_buff[%s]", temp_buff);
+                
+                chk = RCV_CUST_NO;
+               /* MQ 데이터 parsing : pcmqutil.pc 라이브러리 call */
+                mt103_data_parsing(&mt103, temp_buff, chk, MT103);
+            }
+            memset(temp_buff, 0x00, sizeof(temp_buff));
+            j = 0;
 
-            /* REFERENCE NO */
+/*
+            // REFERENCE NO
             if (memcmp(temp_buff, ":20:", 4) == 0 ) {
                 chk = REFERENCE_NO;
             }
-            /* 수취계좌 & 수치인명 */
-            if (memcmp(temp_buff, ":59:/", 5) == 0) {
-                chk = RCV_CUST_NO;
+
             }
-            /* 의뢰인명, 전문에 대해서는 2번째 라인만 읽도록 함 */
+            // 의뢰인명, 전문에 대해서는 2번째 라인만 읽도록 함 
             if (memcmp(temp_buff, ":50K:", 5) == 0) {
                 chk = REQ_CUST_NAME;
             }
-            memset(temp_buff, 0x00, sizeof(temp_buff));            
-        } 
+  */          
+        }  /* end of New line */ 
     } /* end FOR LOOP */
     SYS_TREF;
     return ERR_NONE;
