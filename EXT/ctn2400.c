@@ -1363,7 +1363,55 @@ static int f100_ctmstr_select(ctn2400_ctx_t *ctx)
         /* ------------------------------------------------------------ */
         /* 조회정보 DATA SET                                              */
         /* ------------------------------------------------------------ */
-        
+        utol2an(ctmstr.blk_no,  LEN_CTHLAY_BLOCK_NO,    cthlay_kti->block_no);
+        utol2an(ctmstr.seq_no,  LEN_CTHLAY_SEQ_NO  ,    cthlay_kti->seq_no);
+        utol2an(ctmstr.rec_cnt, LEN_CTHLAY_REC_CNT ,    cthlay_kti->rec_cnt);
+        /* cthlay_t에서 file_size필드가 존재하지 않음
+         * rec_size에 file_size를 넣은 것 같음.
+        */
+        utol2an(ctmstr.file_size, LEN_CTHLAY_REC_SIZE,  cthlay_kti->rec_size);
+
+        memset(cthlay_kti->detl_area, 0x20,   LEN_CTHLAY_DETL_AREA);
+        memcpy(cthlay_kit->detl_area, ctmstr.detl_area, strlen(ctmstr.detl_area));
+
+        SYS_DBG(" -------------------------------------------------------------");
+        SYS_DBG("       CTMSTR      FETCH DATA                                 ");
+        SYS_DBG(" -------------------------------------------------------------");
+        SYS_DBG(" ctmstr.blk_no                  = [%.4s]",   ctmstr.blk_no     );
+        SYS_DBG(" ctmstr.seq_no                  = [%.3s]",   ctmstr.seq_no     );
+        SYS_DBG(" ctmstr.rec_cnt                 = [%.6s]",   ctmstr.rec_cnt    );
+        SYS_DBG(" ctmstr.file_size               = [%.6s]",   ctmstr.file_size  );
+        SYS_DBG(" ctmstr.detl_area               = [%.100s]", ctmstr.detl_area  );
+        SYS_DBG(" -------------------------------------------------------------");
+
+        SYS_TREF;
+
+        return ERR_NONE;
 }
+
+/* --------------------------------------------------------------------------------------------------------- */
+/* Decoupling 추가                                                                                            */
+/* --------------------------------------------------------------------------------------------------------- */
+static int f200_ctmstr_cursor_close(ctn2400_ctx_t   *ctx)
+{
+    int                 rc = ERR_NONE;
+    ctarg_t             *ctarg_kti;
+    ctarg_kti        =  (ctarg_t *) &ctx->ctarg_kti;
+
+    if (g_ctmst_cursor_kti == 1){
+        EXEC SQL CLOSE CTMSTR_CUR_2;
+        g_ctmst_cursor_kti = 0;
+    }
+
+    /* --------------------------------------------------------- */
+    /* 블럭번호 및 일련번호 Reset                                     */
+    /* --------------------------------------------------------- */
+    memset(ctarg_kti->blk_no,  '0' , LEN_CTARG_BLK_NO);
+    memset(ctarg_kti->seq_no,  '0' , LEN_CTARG_SEQ_NO);
+
+    return ERR_NONE;
+
+}
+
 /* --------------------------------------------------------------------------------------------------------- */
 /* --------------------------------------------------------------------------------------------------------- */
