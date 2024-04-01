@@ -1468,13 +1468,120 @@ static int w000_make_kti_s_file(ctn2400_ctx_t   *ctx)
 
     SYS_TRST;
 
-    ctarg_kti   = 
+    ctarg_kti   =  (ctarg_t *)  &ctx->ctarg_kti;
+    cthlay_kit  =  (cthlay_t *) &ctx->cthlay_kti;
 
+    //현재 GR1535 record counter를 increase 
+    g_kti_temp_cnt = g_kti_temp_cnt + 1;
 
+    SYS_DBG("g_kti_temp_cnt = [%d]", g_kti_temp_cnt);
 
+    // GR1535 send directory 조회 
+    memset(tx_dir,  0x00, sizeof(tx_dir));
+    memset(tx_file, 0x00, sizeof(tx_file));
 
+    memcpy(tx_file,  ctarg_kti->appl_name,  LEN_CTARG_APPL_NAME);
+    utotrim(tx_file);
 
+    ctx->sta_type = 0;
 
+    EXEC SQL  SELECT    TX_DIR ,
+                        STA_TYPE,
+                INTO   :tx_dir,
+                       :ctx->sta_type
+                FROM    EXNDMFILE
+               WHERE    SR_FLAG = '1'
+                 AND    TX_FILE = :tx_file;
+
+    if (SYS_DB_CHK_FAIL){
+        db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s w000_make_kti_s_file() :"
+                             "NDM Directory select ERROR[%d] item_name[%s]"
+                             "담당자확인! MSG[%s]", __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR, tx_file);
+        env = getenv("EXTHOME");
+        if (env[1] == 'r')
+            sprintf(tx_dir, "/rextkr1/ndm/kti/send/");
+        else if (env[1] == 'u')
+            sprintf(tx_dir, "/rextkr1/ndm/kti/send/");
+        else if (env[1] == 'P')
+            sprintf(tx_dir, "/rextkr1/ndm/kti/send/");
+        else
+            sprintf(tx_dir, "/rextkr1/ndm/kti/send/");
+    }
+
+    memset(rec_cnt,      0x00, sizeof(rec_cnt));
+    memset(file_size,    0x00, sizeof(file_size));
+    memset(detl_area,    0x00, sizeof(detl_area));
+
+    memcpy(rec_cnt,     cthlay_kti->rec_cnt,    LEN_CTHLAY_REC_CNT);
+    memcpy(file_size,   cthlay_kti->rec_size,   LEN_CTHLAY_REC_SIZE);
+    memcpy(detl_area,   cthlay_kti->detl_area,  atoi(file_size));
+
+    /* ----------------------------------------------------------- */
+    SYS_DBG("=================== 전송시작 ===========================");
+    SYS_DBG("w000_make_kti_s_file: rec_cnt    = [%d]", atoi(rec_cnt));
+    SYS_DBG("w000_make_kti_s_file: send_len   = [%d]", atoi(file_size));
+    SYS_DBG("w000_make_kti_s_file: send_Data  = [%.100s]", detl_area);
+    /* ----------------------------------------------------------- */
+
+    /* 대외기관 data NDM 을 통해 KTI전송 */
+    memset(temp_path, 0x00, sizeof(temp_path));
+    sprintf(temp_path, "%s/%s.temp", utotrim(tx_dir), utotrim(tx_file));
+
+    fp = fopen(temp_path, "a");
+    if (fp == NULL){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s w000_make_kti_s_file() :"
+                             "[%s] file open error [%d]",
+                             __FILE__, temp_path, errno);
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "FILE OPEN ERROR");
+        return ERR_ERR;
+    }
+
+    /* ----------------------------------------------------------------- */
+    /* 전체 data에 대한 레코드 크기 line size = 180 byte 씩 파일 write          */
+    /* ----------------------------------------------------------------- */
+    line_size = (int)(atoi(file_size) / atoi(rec_cnt));
+    SYS_DBG("w000_make_kti_s_file: line size     = [%d]", line_size);
+
+    data_ptr = detl_area;
+
+    while(strlen(data_ptr) > 0){
+        //sys_dbg("w000_make_kti_s_file : strlen(data_ptr) = [%d]", strlen(data_ptr));
+        memset(rec_temp, 0x00, sizeof(rec_temp));
+        memcpy(rec_temp, data_ptr,    line_size);
+
+        fprintf(fp, rec_temp);
+        fprintf(fp, "\n");
+
+        data_ptr = data_ptr +  line_size;
+
+    }
+    fclose(fp);
+
+    //--------------------------------------------------------------------
+
+    /* ================================================================== */
+    /* 현재 GR1535의 마지막 레코드인 경우 파일명 변경 (GR1535.temp => GR1535)      */
+    /* GR1535 -> 받아온 파일명으로 변경 (하드코딩 제거 )                          */
+    /* ================================================================== */
+    SYS_DBG("g_kti_send_cnt = [%d]",    g_kti_send_cnt);
+    SYS_DBG("g_kti_temp_cnt = [%d]",    g_kti_temp_cnt);
+
+    if (g_kti_temp_cnt == g_kti_send_cnt){
+        //GR1535 전체경로 설정
+        memset(file_path,   0x00, sizeof(file_path));
+        sprintf(file_path, "%s/%s", utotrim(tx_dir), utotrim(tx_file));
+
+        //기존에 만들어진 파일이 이미 존재하는지 check 
+        if (access(file_path, F_OK) != -1) {
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s w000_make_kti_s_file(): "
+                                 "[%s] file already exist ", __FILE__, file_path);
+            return ERR_ERR;
+        }
+
+        //작업한 파일을 전송파일명으로 변환 
+        
+    }
 
 }
 /* --------------------------------------------------------------------------------------------------------- */
