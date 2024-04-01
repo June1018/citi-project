@@ -1580,8 +1580,23 @@ static int w000_make_kti_s_file(ctn2400_ctx_t   *ctx)
         }
 
         //작업한 파일을 전송파일명으로 변환 
-        
+        rename(temp_path, file_path);
+        SYS_DBG("file path      =[%s]", file_path);
+
+        // 0 byte check file(GR1535.chk) 을 생성
+        // 0 byte check file(filename.chk) 을 생성
+        memset(check_path, 0x00, sizeof(check_path));
+
+        sprintf(check_path, "%s/%s.chk", utotrim(tx_dir), utotrim(tx_file));
+        SYS_DBG("check_path     = [%s]",    check_path);
+
+        fp_chk = fopen(check_path, "w");
+        fclose(fp_chk);
     }
 
+    SYS_TREF;
+
+    return ERR_NONE;
+
 }
-/* --------------------------------------------------------------------------------------------------------- */
+/* -------------------------------------------End of Program ----------------------------------- */
