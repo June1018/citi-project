@@ -1453,9 +1453,22 @@ static int w000_make_kti_s_file(ctn2400_ctx_t   *ctx)
     char                file_size  [LEN_CTHLAY_REC_SIZE     +1 ];
     char                detl_area  [LEN_CTHLAY_DETL_AREA    +1 ];
     char                tx_dir[256];
-    cti0030f_t          cti0030f;
+    char                tx_file[256];
+    char                file_path[256];
+    char                temp_path[256];
+    char                check_path[256];
+    char                rec_temp   [LEN_CTHLAY_DETL_AREA    +1 ];
+    char                *data_ptr;
+    char                *env;
+    FILE                *fp;
+    FILE                *fp_chk;
+    cthlay_t            *cthlay_kit;
     ctarg_t             *ctarg_kti;
 
+
+    SYS_TRST;
+
+    ctarg_kti   = 
 
 
 
