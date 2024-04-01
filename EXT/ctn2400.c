@@ -1414,4 +1414,54 @@ static int f200_ctmstr_cursor_close(ctn2400_ctx_t   *ctx)
 }
 
 /* --------------------------------------------------------------------------------------------------------- */
+static int f300_ctsta_update(ctn2400_ctx_t  *ctx, int host_sts_flag)
+{
+    int                 rc = ERR_NONE;
+    cti0030f_t          cti0030f;
+    ctarg_t             *ctarg_kti;
+
+    ctarg_kti   =  (ctarg_t *) &ctx->ctarg_kti;
+    memset(&cti0030f,   0x00, sizeof(cti0030f_t));
+    cti0030f.in.ctarg   = ctarg_kti;
+
+    /* KTI 전송완료 사태 && KTI 만 사용 */
+    if (host_sta_flag == 8 && ctx->sta_type == 2){
+        SYS_DBG("KTI만 전송");
+        host_sta_flag = 9;
+    }
+
+    cti0030f.in.i_flag = host_sta_flag;
+
+    rc = cto0030f(&cti0030f);
+    if (rc == ERR_ERR){
+        f200_ctmstr_cursor_close(ctx);
+        return ERR_ERR;
+    }
+
+    return ERR_NONE;
+
+}
+
+/* --------------------------------------------------------------------------------------------------------- */
+/* Decoupling 추가                                                                                            */
+/* --------------------------------------------------------------------------------------------------------- */
+static int w000_make_kti_s_file(ctn2400_ctx_t   *ctx)
+{
+    int                 rc = ERR_NONE;
+    int                 line_size;
+    char                rec_cnt    [LEN_CTHLAY_REC_CNT      +1 ];
+    char                file_size  [LEN_CTHLAY_REC_SIZE     +1 ];
+    char                detl_area  [LEN_CTHLAY_DETL_AREA    +1 ];
+    char                tx_dir[256];
+    cti0030f_t          cti0030f;
+    ctarg_t             *ctarg_kti;
+
+
+
+
+
+
+
+
+}
 /* --------------------------------------------------------------------------------------------------------- */
