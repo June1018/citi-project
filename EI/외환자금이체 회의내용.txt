@@ -1,6 +1,5 @@
 외환자금이체 회의내용
 
-저가형 에어팟 라이트
 고유번호 로직
 결제원에 정의된 거래고유번호
 AN20
@@ -13,3 +12,20 @@ SWIFT 전문이 포함된 거래전문은 발신기관 대표코드 3자리(027)
 +사용자번호(1자리)로 구성하며, 전문송수신 기관은 동일한 번호 SET하여 응답한다. 
  고유번호는 MT103,192, 202,292전문의 20번 field(송수신자의 전문고유번호)
 를 의미하며, 20번 FIELD의 값을 그대로 SET하는 것을 추천한다.
+
+Sender's Correnspondent 
+- 송신기관 수신기관에 자금을 상환할 계좌 또는 수신기관의 지점 또는 다른 금융기관 
+
+[항목2]  Line1의 Code종류 
+
+CODE    Content                     Type
+ARNU    Alien Rgistration           ARNU/ISO country Code(2)/Alien Registration Number
+CCPT    Passport Number             CCPT/ISO country Code/Passport Number.
+CUST    Customer Identification     CUST/ISO country Code/취득기관/Customer Identification Number
+        Number
+DRLC    Driver License Number       DRLC/취득기관의 ISO country code /취득기관/Driver's License Number
+EMPL    Employer Number             EMPL/입사기관의 ISO country code/입사기관/
+NIND    National Identify Number    NIND/ISO country Code/취득기관/National Identify Number
+SOSE    Social Security Number      SOSE/ISO country Code/Social Security Number
+TXID    Tax Identification Number   TXID/ISO country Code/Tax Identification Number
+
