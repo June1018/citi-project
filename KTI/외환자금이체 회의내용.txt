@@ -110,19 +110,19 @@ Forex21 -> Listen Q ------> SYMQFRX_ONOUTG ->  SYMQFRX_ONOUT      -----------> D
 					
 
 EXMQLOG table (routing table 역할 예정)
-1	PROC_DATE	        Y	N	VARCHAR2	8	처리일자
-2	PROC_TIME		        N	VARCHAR2	9	처리시간 sec   
-3	CHNL_CODE	        Y	N	VARCHAR2	3	채널코드
-4	MQ_APPL_CODE	    Y	N	VARCHAR2	2	MQ업무코드 (01, 02 등) 보통 취급: 홀수 , 개설:  짝수
-5	IO_TYPE		            N	NUMBER	    1,0	취급요청/취급응답/개설요청/개설응답/취급콜백 1/2/3/4/5 
-6	PID	                Y	N	VARCHAR2	6	process id
-7	MSG_ID	            Y	N	VARCHAR2	24	참고용 micro sec 20자리
-8	CORR_ID			            VARCHAR2	24	MQMD.corr_id
-9	APPL_CODE			        VARCHAR2	3	업무코드
+1	PROC_DATE	        Y	N	VARCHAR2	8		처리일자
+2	PROC_TIME		        N	VARCHAR2	9		처리시간 sec   
+3	CHNL_CODE	        Y	N	VARCHAR2	3		채널코드
+4	MQ_APPL_CODE	    Y	N	VARCHAR2	2		MQ업무코드 (01, 02 등) 보통 취급: 홀수 , 개설:  짝수
+5	IO_TYPE		            N	NUMBER	    1,0		취급요청/취급응답/개설요청/개설응답/취급콜백 1/2/3/4/5 
+6	PID	                Y	N	VARCHAR2	6		process id
+7	MSG_ID	            Y	N	VARCHAR2	24		참고용 micro sec 20자리
+8	CORR_ID			            VARCHAR2	24		MQMD.corr_id
+9	APPL_CODE			        VARCHAR2	3		업무코드
 10	TX_CODE	            Y	N	VARCHAR2	10	
 11	MSG_NO			            VARCHAR2	30	
-12	MSGNO			            VARCHAR2	4000  MQ MSG
-13	fil1			            VARCHAR2	4000  추가되는 MQ MSG
+12	MSGNO			            VARCHAR2	4000  	MQ MSG
+13	fil1			            VARCHAR2	4000  	추가되는 MQ MSG
 14	fil2			            VARCHAR2	30	
 15	fil3			            VARCHAR2	30	
 TCPHEAD : 거래고유번호 실어서 보내줘야함. 가능한지 확인필요?
