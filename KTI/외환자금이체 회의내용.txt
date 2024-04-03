@@ -1,13 +1,21 @@
 [실시간 외환자금이체 회의내용]
+
 2023-04-03 수요일
 결재원 관련 추가 언급 사항 정리
 내부 거래코드 : TX_CODE 
 무응답 max 10회 
 취급취소 재요청 전문(0400) 없음. (결제원답변 기다림.) 
 - 취급이체 거래 (17시까지 결재원 응답x 최종 정상?오류? 미처리내역 count됨 )
+- 취급 SAF logic
+  매 10분마다 한번씩 trigger 요청시간 10분 초과 거래만 대상
+  FCYDFTJRN 기준
+  0201재요청 전문으로 전송
+  별도 DB 필요없음
+  국내외 
 
 
-
+고유번호logic - KTI	인경우 공통정보부.전문추적번호(AN8) 첫번째 자리  (K포함8자리)
+			  Forex21인 경우 그냥 첫번째 K없는 8자리 
 
 
 
@@ -164,7 +172,7 @@ EXBRN 영업점 정보 table 에서 ICG/GCG 분류 컬럼확인필요?
 
 
 HOST		EI
-조회거래	    SafHostDaemon 	                                         MQ수신
+조회거래	   SafHostDaemon 	                                         MQ수신
 	        /pforex21/KFT/logs/wcs/biz/	                                 송신
 	        MG/recv/MgHostKftcRcvDaemon.log
 	        HOST수신데몬
