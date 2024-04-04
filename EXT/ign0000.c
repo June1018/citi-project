@@ -254,4 +254,79 @@ static int c000_jrn_insert(ign0000_ctx_t    *ctx)
 
 /* -------------------------------------------------------------------------------- */
 static int d000_ext_msg_send(ign0000_ctx_t  *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    igmsgcomm_t         *igmsgcomm;
+    int                 len;
+
+
+    SYS_TRSF;
+
+    //길이에 자기자신을 포함하지 않았으므로 길이 4자리 더해서 보내준다. 
+    send_len = uto2in(ctx->msglength,   LEN_IGMSGCOMM_MSGLENGTH) + 4;
+
+    SYS_DBG("send len [%d]", send_len);
+
+    /* sysocbsi return code check  */
+    rc = sysocbsi(ctx->cb, IDX_EXTSENDDATA, &HOSTRECVDATA[300], send_len);
+    if (rc == ERR_ERR) {
+        SYS_HSTERR(SYS_LN, SYS_GENERR, " COMMBUFF SET ERR ");
+        return ERR_ERR;
+    }
+
+    /* 대외기관 G/W에 호출하는 방식을 전달하기 위한 값을 set */
+    SYSGWINFO->time_val  = SYSGWINFO_SAF_DFLT_TIMEOUT;
+    SYSGWINFO->call_type = SYSGWINFO_CALL_TYPE_SAF;
+    SYSGWINFO->rspn_flag = SYSGWINFO_REPLY;
+    SYSGWINFO->msg_type  = SYSGWINFO_MSG_1500;
+    strcpy(SYSGWINFO->func_name,    "TCPIGN");
+
+    SYS_DBG("======================================================");
+    SYS_DBG("commbuff");
+    SYS_DBG("[%s]", HOSTRECVDATA);
+    SYS_DBG("======================================================");
+
+    //log를 먼저 저장하고 대외전송을 시작하게 끔 변경 
+    rc = z100_log_insert(ctx, EXTSENDDATA, send_len, '0', '1');
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s: IGN0000 : IGN_LOG ERROR [unix->KFTC]", __FILE__);
+        return ERR_ERR;
+    }
+
+    /* 대외기관 데이터 전송  */
+    rc = sys_tpcall("SYEXTGW_IG", ctx->cb, TPNOTRAN);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s: IGN0000 : g000_ext_msg_send()"
+                             "ERROR %d [해결방안 ]대외기관 G/W 담당자CALL", 
+                             __FILE__, tperrno);
+        SYS_HSTERR(SYS_LN, 264400, " TCP & SYSTEM ERR ");
+        return ERR_ERR;
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+SYS_CATCH:
+
+    return ERR_ERR;
+
+
+}
+/* -------------------------------------------------------------------------------- */
+static int z000_error_proc(ign000_ctx_t *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    int                 len = 0;
+
+    SYS_TRSF;
+    /* ---------------------------------------------------- */
+    SYS_DBG("z000_error_proc: error_code[%d]", sys_err_code());
+    SYS_DBG("z000_error_proc: err_msg[%s]   ", sys_err_msg());
+    /* ---------------------------------------------------- */
+
+    SET_1500ERROR_INFO(EXMSG1500);
+}
+/* -------------------------------------------------------------------------------- */
 /* -------------------------------------------------------------------------------- */
