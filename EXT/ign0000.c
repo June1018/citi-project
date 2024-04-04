@@ -327,6 +327,96 @@ static int z000_error_proc(ign000_ctx_t *ctx)
     /* ---------------------------------------------------- */
 
     SET_1500ERROR_INFO(EXMSG1500);
+
+    SYS_DBG("EXMSG1500->tx_code[%.10s] " , EXMSG1500->tx_code);
+    SYS_DBG("EXMSG1500->err_code[%.7s] " , EXMSG1500->err_code);
+
+    SYSGWINFO->gw_rspn_send =   SYSGWINFO_GW_REPLY_SEND_NO;
+    SYSGWINFO->msg_type     =   SYSGWINFO_MSG_1500;
+    
+    rc = sysocbsi(ctx->cb, IDX_SYSIOOUTG, EXMSG1500, sizeof(exmsg1500_t));
+
+    if (rc == ERR_ERR){
+        SYS_HSTERR(SYS_LC, SYS_GENERR, "EXT_MSG COMMBUFF ERR");
+        return ERR_ERR;
+    }
+
+    SYS_TREF;
+    
+    return ERR_NONE;
+
 }
 /* -------------------------------------------------------------------------------- */
+static int z100_log_insert(ign0000_ctx_t,   *ctx, char  *log_data, int size, char io_flag, char sr_flag)
+{
+    int                 rc = ERR_NONE;
+    char                *hp;
+    iglog_t             iglog;
+
+    SYS_TRSF;
+
+    memset(&ilog,   0x00, sizeof(iglog_t));
+
+    utodate1(ilog.proc_date);
+    utotime2(ilog.proc_time);
+    memset(iglog.io_flag,       io_flag,        LEN_IGLOG_IO_FLAG);
+    memset(iglog.sr_flag,       sr_flag,        LEN_IGLOG_SR_FLAG);
+    memcpy(iglog.trace_no,      trace_no,       LEN_IGLOG_TRACE_NO);
+    memcpy(iglog.log_data,      log_data,       size);
+    memcpy(iglog.comm_head_300, HOSTRECVDATA),  LEN_IGI3100F_COMM_HEAD_300);
+
+    /* ------------------------------------------------------------------------------- */
+    SYS_DBG("z100_log_insert: len[%d]io_flag=[%c]sr_flag[%c]" , size, io_flag, sr_flag);
+    SYS_DBG("z100_log_insert: msg[%d][%.*s]   ", size, size, log_data);
+    /* ------------------------------------------------------------------------------- */
+
+
+    /* TCP/IP 헤더정보 */
+    hp = sysocbgp(ctx->cb, IDX_TCPHEAD);
+    if (hp != NULL) {
+
+        memcpy(iglog.tcp_head,      hp,     LEN_IGLOG_TCP_HEAD);
+    }
+
+    SYS_DBG("BEFORE insert IGLOG proc_date[%s],proc_time[%s]io_flag[%s] sr_flag[%s]tracn_no[%s]log_data[%.*10s]", 
+    iglog.proc_date,iglog.proc_time,iglog.io_flag, iglog.sr_flag, iglog.trace_no,iglog.log_data);
+
+    EXEC SQL 
+        INSERT INTO  IGLOG  
+        (
+            PROC_DATE, 
+            PROC_TIME, 
+            IO_FLAG,
+            SR_FLAG,
+            TRACE_NO,
+            TCP_HEAD,
+            LOG_DATA,
+            COMM_HEAD_300 
+        ) VALUES(
+           :iglog.proc_date,
+           :iglog.proc_time,
+           :iglog.io_flag,
+           :iglog.sr_flag,
+           :iglog.trace_no,
+           :iglog.tcp_head,
+           :iglog.log_data,
+           :iglog.comm_head_300
+        );
+
+    if (SYS_DB_CHK_FAIL) {
+        db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        ex_syslog(LOG_ERROR,    "[APPL_DM] %s z100_log_insert() : INSERT IGLOG %d"
+                                "[해결방안 ] 인터넷지로 IG담당자 Call: msg[%s]",
+                                __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "IGLOG INSERT ERROR");
+        return ERR_ERR;
+    }
+
+    EXEC SQL COMMIT WORK;
+
+
+    SYS_TREF;
+    return ERR_NONE;
+    
+}
 /* -------------------------------------------------------------------------------- */
