@@ -137,7 +137,7 @@ SYEXTGW_DF -> DF0011 (Forex21)
 - EI table 거래고유번호 존재하는경우 찾아서 다시 KTFC 요청
 - 거래고유번호 NOT FOUND 바로 KTI 요청 BY PASS
 
-Forex21                                                                                                                                                                                            대외기관
+Forex21                                                                                                                                       대외기관
 
 Forex21 -> Listen Q ------> SYMQFRX_ONOUTG ->  SYMQFRX_ONOUT      -----------> DFS0011 ---------------------------|
 		      |----------------------|-----------|---------callback               |                               |
