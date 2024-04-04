@@ -6,16 +6,16 @@ Flexcube ITR Setup 진행중
 BRD 수정본 검토 ..
 당타발 표준수수료 확인
 ASIS
-당발 : USD $10,000  이하 					  수수료   5,000
-	  USD $10,000  이상 ~ $100,000   이하	  수수료  10,000
-	  USD $100,000 이상 ~ $1,000,000 이하     수수료 100,000  	
+당발 : USD $10,000  이하     수수료   5,000
+	  USD $50,000  이하     수수료  10,000
+	  USD $50,000  초과     수수료  15,000  	
 타발 : 수수료없음 
 Forex21 관련해서 EI 업무정의 필요
 
 
 To-Do LIST
 FRD review session 4월29일까지 주3회 
-DWH Downstream 영향도 분석 - 관련 개발팀과 조사중  ICG관련업무 없음 drop 
+DWH Downstream 영향도 분석 - 관련 개발팀과 조사중  - ICG업무관련 없음 drop할거임.
 일괄전송 EI -> KTI 온라인 전문으로 주고 받기로 했음. 
 FOREX21 & EI 전문 ICD협의
 거래코드   :   
