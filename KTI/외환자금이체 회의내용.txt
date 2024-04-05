@@ -23,7 +23,7 @@ input code (취급/outgogin/당발)
 21: KFS 790025
 22: CPS 791125
 23: TM 790425
-24: 테러시 재처리 (미사용 )
+24: 텔러시 재처리 (미사용 )
 25: CD BE STP PAYROLL			lumpsum출급 책임자 승인 없음. 
 26: 타행자동이체 <--- 실제 미사용
 27: SWAN
