@@ -13,7 +13,7 @@ input code (취급/outgogin/당발)
 10: VA <- 사용안함 
 11: PAYROLL(citiDirect GIRO)
 12: WEB-TERMINAL <-- 수신연동  SWAN70040지급 -->연동구분:타행 
-13: MFT- FLOW(IMPS(인도시스템)-> APAC F/C (File Consolidator) 단건 DFT 
+13: MFT- FLOW(IMPS(인도시스템)-> APAC F/C (File Consolidator) 단건 DFT MT103/202 를 여러개 붙여 놓은 형태 
 15: 76601 타행단건 입급 SWAN 7 거래 
 16: SWIFT Manual 
 17: FTI-DFT
