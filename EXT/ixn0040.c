@@ -317,7 +317,13 @@ static int b000_msg_logging(ixn0040_ctx_t   *ctx, int log_type)
         ixi0230f.in.log_len         = ctx->ext_recv_len;
         memcpy(ixi0230f.in.log_data,  ctx->ext_recv_data, ixi230f.in.log_len);
     }
-
+    /* 결제원 송신전문 로깅 */
+    else{
+        ixi0230f.in.flag            = 'S';
+        ixi0230f.in.log_type        = 'K';
+        ixi0230f.in.log_len         = sysocbgs(ctx->cb, IDX_EXTSENDDATA);
+        memcpy(ixi0230f.in.log_data,  EXTSENDDATA, ixi0230f.in.log_len );        
+    }
     /* ---------------------------------------------------------------------- */
     SYS_DBG("b000_msg_logging: len = [%d]", ixi0230f.in.log_len);
     SYS_DBG("b000_msg_logging: msg = [%s]", ixi0230f.in.log_data);
@@ -334,274 +340,128 @@ static int b000_msg_logging(ixn0040_ctx_t   *ctx, int log_type)
         return ERR_NONE;
     }
 
+     rc = sysocbsi(&dcb, IDX_EXMSG1200, ixi0230f, sizeof(ixi0230f));
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXN0040: b000_msg_logging()"
+                             "COMMBUFF BACKUP ERROR "
+                             "[해결방안]시스템 담당자 call", 
+                             __FILE__);
+        sys_err_init();
+        sysocbfb(&dcb);
+        return ERR_NONE;
+    }
 
+     rc = sys_tpcall("IXN0230F", &dcb, TPNOREPLY | TPNOTRAN);
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXN0040: b000_msg_logging()"
+                             "IXI0230F 서비스호출 ERROR [%d:%d] "
+                             "[해결방안]TMAX 담당자 call", 
+                             __FILE__, tperrno, sys_err_code());
+        sys_err_init();
 
+    }
 
+    sysocbfb(&dcb);
 
-
-
-
-
-
-
+    SYS_TREF;
+    return ERR_NONE;
     
 }
 /* ------------------------------------------------------------------------------------------------------------ */
-static int   b100_mqparm_load(mqnsend01_ctx_t   *ctx)
-{
-
-    int                 rc  = ERR_NONE;
-    static int          mqparam_load_flag = 0;
-    mqi0001f_t          mqi0001f;
-
-    if (mqparam_load_flag == 1){
-        return ERR_NONE;
-    }
-
-    SYS_TRSF;
-
-    memset(&mqi0001f,   0x00, sizeof(mqi0001f_t));
-
-    memcpy(EXMQPARM->chnl_code, g_chnl_code,    LEN_EXMQPARM_CHNL_CODE);
-    memcpy(EXMQPARM->appl_code, g_appl_code,    LEN_EXMQPARM_APPL_CODE);
-
-    mqi0001f.in.exmqparm = EXMQPARM;
-    rc = mq_exmqparm_select(&mqi0001f);
-    if (rc == ERR_ERR) {
-        SYS_HSTERR(SYS_LF, 8600, "[FAIL]EXMQPARM select failed chnl[%s] err[%d][%s]", g_chnl_code, db_errno(), db_errstr());
-        return ERR_ERR;
-    }
-
-    utotrim(EXMQPARM->mq_mngr);
-    if (strlen(EXMQPARM->mq_mngr) == 0) {
-        SYS_HSTERR(SYS_LF, SYS_GENERR, "[FAIL]EXMQPARM [%s/%s/%s].mq_mngr is null", g_chnl_code, g_appl_code, EXMQPARM->mq_mngr);
-        return ERR_ERR;
-    }
-
-    utotrim(EXMQPARM->getq_name);
-    if (strlen(EXMQPARM->getq_name) == 0) {
-        SYS_HSTERR(SYS_LF, SYS_GENERR, "[FAIL]EXMQPARM [%s/%s/%s].getq_name is null", g_chnl_code, g_appl_code, EXMQPARM->getq_name);
-        return ERR_ERR;
-    }
-
-    //
-    //PRINT_EXMQPARM(EXMQPARM);
-    //
-
-    mqparam_load_flag = 1;
-
-    SYS_TREF;
-
-    return ERR_NONE;
-}
-
-
-
-/* ------------------------------------------------------------------------------------------------------------ */
-static int   d100_init_mqcon(mqnsend01_ctx_t    *ctx)
-{
-
-    int                 rc  = ERR_NONE;
-
-    if (ctx->is_mq_connected == 1){
-        return ERR_NONE;
-    }
-
-    SYS_TRSF;
-
-    if (ctx->mqhconn != 0 ){
-        ex_mq_disconnect(&ctx->mqhconn);
-        ctx->mqhconn = 0;
-    }
-
-    /* Queue Manager Connect */
-    rc = ex_mq_connect(&ctx->mqhconn, EXMQPARM->mq_mngr);
-    if (rc == MQ_ERR_SYS) {
-        ex_syslog(LOG_ERROR, "[CLIENT DM] %s d100_init_mqcon MQ OPEN failed g_chnl_code[%s].mq_mngr[%s]", __FILE__, g_chnl_code, EXMQPARM->mq_mngr);
-        return ERR_ERR;
-    }
-
-    /* 
-     * mq_con_type : Queue Connection Type 
-     * -----------------------------------------
-     * 1 = Only GET, 2 = Only PUT, 3 = BOTH
-     */
-     /* GET Queue Open */
-    rc = ex_mq_open(&ctx->mqhconn, &ctx->mqhobj, EXMQPARM->putq_name, MQ_OPEN_OUTPUT);
-    if (rc == MQ_ERR_SYS) {
-        ex_syslog(LOG_ERROR, "[CLIENT DM] %s d100_init_mqcon MQ OPEN failed g_chnl_code[%s].mq_mngr[%s]", __FILE__, g_chnl_code, EXMQPARM->mq_mngr);
-        ex_mq_disconnect(&ctx->mqhconn);
-        return ERR_ERR;
-    }
-
-    /* ----------------------------------------------------------------------------------- */
-    SYS_DBG("CONN Handler       :[%d][%08x]", ctx->mqhconn, ctx->mqhconn);
-    SYS_DBG("GET QUEUE Handler  :[%d][%08x]", ctx->mqhobj , ctx->mqhobj );
-    /* ----------------------------------------------------------------------------------- */
-
-    ctx->is_mq_connected = 1;
-
-    SYS_TREF;
-
-    return ERR_NONE;
-
-}
-
-
-/* ------------------------------------------------------------------------------------------------------------ */
-static int   e100_get_sendmsg(mqnsend01_ctx_t   *ctx)
+static int c000_kftc_fild_chk(ixn0040_ctx_t *ctx)
 {
 
     int                 rc = ERR_NONE;
-    mqimsg001_t         mqimsg001;
-
-    /* DB 연결이 끊어진 경우 재 연결 */
-    if (g_db_connect("") != ERR_NONE) {
-        ex_syslog(LOG_ERROR, "e100_get_sendmsg db_connect re connecting ");
-        tpschedule(60);
-        return GOB_NRM;
-    }
-
-    EXEC SQL DECLARE SENDMSG_CURSOR CURSOR for 
-        SELECT PROC_DATE,
-               CHNL_CODE,
-               APPL_CODE,
-               IO_TYPE,
-               MSG_ID,
-               CORR_ID,
-               PROC_TIME,
-               RSPN_FLAG,
-               ILOG_JRN_NO,
-               SYS_MTIME,
-               PROC_TYPE,
-               ERR_CODE,
-               ERR_MSG,
-               MQ_DATE,
-               MQ_TIME,
-               MQLEN,
-               MQMSG
-          FROM EXMQMSG_001  
-         WHERE CHNL_CODE = :g_chnl_code
-           AND APPL_CODE = :g_appl_code
-           AND PROC_DATE IN (TO_CHAR(SYSDATE, 'YYYYMMDD') , TO_CHAR(SYSDATE-1, 'YYYYMMDD')
-           AND IO_TYPE   IN (3,4)
-           AND PROC_TYPE = 0
-         ORDER BY PROC_DATE, MSG_ID;
-
-    EXEC SQL OPEN SENDMSG_CURSOR;
-
-    if (SYS_DB_CHK_FAIL) {
-        db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s e100_get_sendmsg(): CURSOR OPEN (EXMQMSG_001) ERROR [%d][해결방안] 업무담당자CALL: MSG[%s] ", __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
-        return ERR_ERR;
-
-    } 
-
-    while(1){
-        /* error 코드 초기화 */
-        memset(MQMSG001, 0x00, sizeof(exmqmsg_001_t));
-
-
-        EXEC SQL FETCH SENDMSG_CURSOR
-                INTO :MQMSG001->proc_date,
-                     :MQMSG001->chnl_code,
-                     :MQMSG001->appl_code,
-                     :MQMSG001->io_type,
-                     :MQMSG001->msg_id,
-                     :MQMSG001->corr_id,
-                     :MQMSG001->proc_time,
-                     :MQMSG001->rspn_flag,
-                     :MQMSG001->ilog_jrn_no,
-                     :MQMSG001->sys_mtime,
-                     :MQMSG001->proc_type,
-                     :MQMSG001->err_code,
-                     :MQMSG001->err_msg,
-                     :MQMSG001->mq_date,
-                     :MQMSG001->mq_time,
-                     :MQMSG001->mqlen,
-                     :MQMSG001->mqmsg;
-
-        if (SYS_DB_CHK_FAIL){
-            //SYS_DBG("EXMQMSG_001 DATA NOT FOUND");
-            return GOB_NRM;
-        }
-
-        //
-        //PRINT_EXMQMSG_001(MQMSG001);
-        //
-        //MQPUT
-        if (f100_put_mqmsg(ctx) == ERR_ERR){
-            SYS_DBG("CALL f100_put_mqmsg !!!!!!!!");
-            return ERR_ERR;
-        }
-
-
-
-
-        memset(&mqimsg001,  0x00, sizeof(mqimsg001_t));
-        mqimsg001.in.mqmsg_001 = MQMSG001;
-        memcpy(mqimsg001.in.job_proc_type, "2", LEN_MQIMSG001_PROC_TYPE);
-        rc = mqomsg001(&mqimsg001);
-        if (rc == ERR_ERR){
-            EXEC SQL ROLLBACK WORK;
-            return ERR_ERR;
-        }
-        EXEX SQL COMMIT WORK;
-
-    }
-
-    return ERR_NONE;   
-
-}
-
-
-/* ------------------------------------------------------------------------------------------------------------ */
-static int   f100_put_mqmsg(mqnsend01_ctx_t *ctx)
-{
-    int                 rc     = ERR_NONE;
-    mq_info_t           mqinfo = {0};
-    MQMD                md     = {MQMD_DEFAULT};
-
-
+    ixi0220x_t          ixi0220x;
 
     SYS_TRSF;
 
-    /* MQPUT을 위한 mq_info_t Set : MQIHEAD + INPDATA   */
-    mqinfo.hobj             = &ctx->mqhobj;         /* PUT QUEUE OBJECT */
-    mqinfo.hcon             = ctx->mqhconn;         /* QM Connection    */
-    mqinfo.coded_charset_id = EXMQPARM->charset_id  /* CodedCharSetID   */
+    memset(&ixi0200x, 0x00, sizeof(ixi0200x_t));
+    ixi0200x.in.ext_recv_data = ctx->ext_recv_data;
 
-    //memcpy(md.MsgId,          MQMI_NONE,      sizeof(md.MsgId));
-    //memcpy(MQMSG001->msg_id,  md.MsgId,       LEN_EXMQMSG001_MSG_ID);
-    //memcpy(mqinfo.msg_id,     MQMSG001.msg_id,LEN_EXMQMSG001_MSG_ID);
+    /* ------------------------------------------------------------------------- */
+    /* 필드 validation  check                                                     */
+    /* ------------------------------------------------------------------------- */
+    SYS_TRY(ix_kftc_fild_val(&ixi0200x));
 
-    memcpy(mqinfo.corrid,       MQMSG001->corr_id,  strlen(MQMSG001->corr_id));
-    memcpy(mqinfo.msgbuf,       MQMSG001->mqmsg,    MQMSG001->mqlen);
-    mqinfo.msglen = MQMSG001->mq_len;
+    SYS_TREF;
+    return ERR_NONE;
+
+
+SYS_CATCH:
+
+    /* 결제원 에러 응답 조립하지 않음. */
+    ctx->kftc_err_set = 0;
+
+    SYS_TREF;
+    return ERR_ERR;
+
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int d000_tran_code_conv(ixn0040_ctx_t    *ctx)
+{
+    int                 rc  = ERR_NONE;
+    exi0250x_t          exi0250x;
+    ixmsg0200a_t        ix0200a;
+
+    SYS_TRSF;
+
+    ix0200a = (ix0200a_t *) ctx->ext_recv_data;
+
+    /*------------------------------------------------------------------------ */
+    /* 거래구분 코드 변환                                                          */
+    /*------------------------------------------------------------------------ */
+    memset(&exi0250x, 0x00, sizeof(exi0250x_t));
+    exi0250x.in.conv_flag       = k;  
+    exi0250x.in.ext_recv_data   = ctx->ext_recv_data;
+
+    memcpy(exi0250x.in.appl_code,   IX_CODE,            LEN_APPL_CODE);
+    memcpy(exi0250x.in.tx_flag  ,   ix0200a->send_flag, LEN_EXI0250X_TX_FLAG);
+    memcpy(exi0250x.in.msg_type ,   ix0200a->msg_code,  LEN_MSG_TYPE);
+    memcpy(exi0250x.in.kftc_tx_code,ix0200a->appl_code, 3);
+
+    rc = ex_tran_code_conv(&exi0250x);
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXN0040: d00_tran_code_conv():"
+                             "거래코드 변환 ERROR : code/msg[%d:%s]"
+                             "[해결방안] IX담당자 CALL" ,
+                             __FILE__, sys_err_code, sys_err_msg());
+        return GOB_NRM;
+    }
+
     
 
-    rc = ex_mq_put_with_opts(&mqinfo, &md, 0);
-    if (rc == ERR_NONE){
-        rc = ex_mq_commit(&ctx->mqhconn);
+    memcpy(ctx->host_tx_code, exi0250x.out.tx_code, LEN_TX_CODE);
 
-        memcpy(MQMSG001->mq_date,   md.PutDate, LEN_EXMQMSG001_MQ_DATE);
-        memcpy(MQMSG001->mq_time,   md.PutTime, LEN_EXMQMSG001_MQ_TIME);
-
-    } else {
-
-        /* reset flag for mq initialize */
-        ctx->is_mq_connected = 0;
-
-        SYS_DBG("CALL ex_mq_put FAIL !!!");
-        ex_syslog(LOG_FATAL, "[APPL_DM] CALL ex_mq_put FAIL [해결방안]시스템 담당자  CALL");
-        ex_mq_rollback(&ctx->mqhconn);
-    }
+    /*------------------------------------------------------------------------ */
+    SYS_DSP(" d000_tran_code_conv:host_tx_code [%s]", ctx->host_tx_code);
+    /*------------------------------------------------------------------------ */
 
     SYS_TREF;
 
-    return ERR_NONE;
+    return ERR_ERR;
+
 
 }
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int e000_exparm_read(ixn0040_ctx_t   *ctx)
+{
+    int                 rc  = ERR_NONE;
+
+}
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
