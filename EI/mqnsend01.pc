@@ -47,7 +47,7 @@
 #define MQMSG001                            (&ctx->exmqmsg_001)
 
 /* ---------------------------------------- structure definitions --------------------------------------------- */
-typedef struct mqnsend01_ctx_s  mqsend01_ctx_t;
+typedef struct mqnsend01_ctx_s  mqnsend01_ctx_t;
 struct mqnsend01_ctx_s {
     exmqparm_t      exmqparm;
     long            is_mq_connected;
@@ -67,8 +67,17 @@ int                 g_sleep_sec;
 /* ------------------------------------------ exported function  declarations --------------------------------- */
 int                 mqnsend01(commbuff_t    *commbuff);
 static int          a000_initial(int argc,  char *argv[]);
+static int          a100_parse_custom_args(int argc,  char *argv[]);
+static int          b100_mqparm_load(mqnsend01_ctx_t    *ctx);
+static int          d100_init_mqcon(mqnsend01_ctx_t     *ctx);
+static int          e100_get_sendmsg(mqnsend01_ctx_t    *ctx);
+static int          f100_put_mqmsg(mqnsend01_ctx_t      *ctx);
+static int          g100_update_proc_code(mqnsend01_ctx_t   *ctx);
+static int          z200_mqmsg_update(mqnsend01_ctx_t   *ctx);
 
+int                 apsvrdone();
 /* ------------------------------------------------------------------------------------------------------------ */
+static int
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
