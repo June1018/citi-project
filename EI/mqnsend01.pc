@@ -1,0 +1,77 @@
+
+/*  @file               mqnsend01.pc
+*   @file_type          pc source program
+*   @brief              CHANNEL ==> MQ ==> EI로 들어오는 PROCESS
+*   @warn
+*   @author
+*   @version 
+*   @dep_haeder
+*   @dep_module
+*   @dep_table
+*   @dep_infile
+*   @dep_outfile
+*   @library
+*   @usage
+*
+*
+*
+*
+*
+*
+*   @generated at 2023/06/02 09:30
+*   @history
+*
+*   성   명 :   일   자    근거자료         변경             내용   
+*  ---------------------------------------------------------------------------------------------------------------
+* 
+*
+*/
+/* ---------------------------------------------- include files ----------------------------------------------- */
+#include <sytcpgwhead.h>
+#include <syscom.h>
+#include <fxarg.h>
+#include <mqi0001f.h>
+#include <cmqc.h>
+#include <exmq.h>
+#include <exmqparam.h>
+#include <exmqmsg_001.h>
+#include <exmqsvc.h>
+#include <mqimsg001.h>
+#include <usrinc/atmi.h>
+#include <usrinc/ucs.h>
+#include <sqlca.h>
+/* ---------------------------------------- constant, macro definitions --------------------------------------- */
+#define EXCEPTION_SLEEP_INTV                3000                        /* EXCEPTION SLEEP Interval 5 min       */
+
+#define EXMQPARM                            (&ctx->exmqparm)
+#define MQMSG001                            (&ctx->exmqmsg_001)
+
+/* ---------------------------------------- structure definitions --------------------------------------------- */
+typedef struct mqnsend01_ctx_s  mqsend01_ctx_t;
+struct mqnsend01_ctx_s {
+    exmqparm_t      exmqparm;
+    long            is_mq_connected;
+    MQHCONN         mqhconn;
+    MQHOBJ          mqhobj;
+    exmqmsg_001_t   exmqmsg_001;
+
+};
+
+/* ------------------------------------- exported global variables definitions -------------------------------- */
+char                g_svc_name[32];                     /* G/W 서비스명         */
+char                g_chnl_code[3 + 1];                 /* CHANNEL CODE       */
+char                g_appl_code[2 + 1];                 /* APPL_CODE          */
+int                 g_sleep_sec;  
+
+
+/* ------------------------------------------ exported function  declarations --------------------------------- */
+int                 mqnsend01(commbuff_t    *commbuff);
+static int          a000_initial(int argc,  char *argv[]);
+
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
