@@ -76,9 +76,42 @@ static int          g100_update_proc_code(mqnsend01_ctx_t   *ctx);
 static int          z200_mqmsg_update(mqnsend01_ctx_t   *ctx);
 
 int                 apsvrdone();
+
+
+
 /* ------------------------------------------------------------------------------------------------------------ */
-static int
+static int          a000_init_proc(int argc,  char *argv[])
+{
+
+    int                 rc = ERR_NONE;
+    int                 i;
+
+    SYS_TRSF;
+
+    /* command argument 처리 */
+    SYS_TRY(a100_parse_custom_args(argc, argv));
+
+    strcpy(g_arch_head.svc_name,    g_svc_name);
+
+
+    SYS_TREF;
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    SYS_TREF;
+    return ERR_ERR;
+}
+
 /* ------------------------------------------------------------------------------------------------------------ */
+static int          a100_parse_custom_args((int argc,  char *argv[])
+{
+    int      c;
+
+    g_sleep_sec = 0.1;
+
+    while((c = getopt(argc, argv, "s:c:a")) != EOF )
+}
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
