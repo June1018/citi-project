@@ -160,32 +160,78 @@ struct ixn0040_ctx_s {
 
 /* ------------------------------------- exported global variables definitions -------------------------------- */
 /* ------------------------------------------ exported function  declarations --------------------------------- */
-static int          a000_data_receive(int argc,  char *argv[]);
-static int          a100_parse_custom_args(int argc,  char *argv[]);
-static int          b100_mqparm_load(mqnsend01_ctx_t    *ctx);
-static int          d100_init_mqcon(mqnsend01_ctx_t     *ctx);
-static int          e100_get_sendmsg(mqnsend01_ctx_t    *ctx);
-static int          f100_put_mqmsg(mqnsend01_ctx_t      *ctx);
-static int          g100_update_proc_code(mqnsend01_ctx_t   *ctx);
-static int          z200_mqmsg_update(mqnsend01_ctx_t   *ctx);
-
-int                 apsvrdone();
-
+static int          a000_data_receive(ixn0040_ctx_t *ctx, commbuff_t    *commbuff);
+static int          b000_msg_logging(ixn0040_ctx_t *ctx, int log_type);
+static int          c000_kftc_fild_chk(ixn0040_ctx_t *ctx);
+static int          d000_tran_code_conv(ixn0040_ctx_t *ctx);
+static int          e000_exparm_read(ixn0040_ctx_t *ctx);
+static int          f000_msg_format(ixn0040_ctx_t *ctx);
+/* Decoupling */
+/* KIT FLAG 조회 및 exmsg1200에 조립 */
+static int f100_gcg_icg_acct_chk_proc(ixn0040_ctx_t *ctx)
+/******************************************************************************************/
+static int g000_ix_skn_check(ixn0040_ctx_t *ctx)
+static int h000_ix_dup_check(ixn0040_ctx_t *ctx)
+/* Decoupling */
+/* EI_MSG_NO 최대값 + 1조립  */
+/******************************************************************************************/
+static int h100_max_msg_no_proc(ixn0040_ctx_t *ctx)
+/******************************************************************************************/
+static int i000_ixjrn_insert(ixn0040_ctx_t *ctx)
+static int j000_ix_host_saf_prod(ixn0040_ctx_t *ctx)
+static int k000_kftc_err_send(ixn0040_ctx_t *ctx)
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int          a000_init_proc(int argc,  char *argv[])
+int ixn0040(commbuff_t  *commbuff)
 {
 
     int                 rc = ERR_NONE;
-    int                 i;
+    ixn0040_ctx_t       _ctx;  
+    ixn0040_ctx_t       *ctx = &_ctx;   
 
     SYS_TRSF;
 
-    /* command argument 처리 */
-    SYS_TRY(a100_parse_custom_args(argc, argv));
+    /* CONTEXT 초기화  */
+    SYS_TRY(a000_data_receive(ctx, commbuff));
 
-    strcpy(g_arch_head.svc_name,    g_svc_name);
+    /* 입력전문 LOGGING  */
+    SYS_TRY(b000_msg_logging(ctx, KFTC_RECV_LOG));
+
+    /* 입력 데이터 검증  */
+    SYS_TRY(c000_kftc_fild_chk(ctx));
+
+    /* 대외기관 거래 코드를 호스트 거래코드 변환   */
+    SYS_TRY(d000_tran_code_conv(ctx));
+
+    /* 거래파라메타 조회   */
+    SYS_TRY(e000_exparm_read(ctx));
+
+    /* 1200전문 변환   */
+    SYS_TRY(f000_msg_format(ctx));
+
+    /* Decoupling     */
+    /* 계좌종류 구분 코드 */
+    SYS_TRY(f100_gcg_icg_acct_chk_proc(ctx));
+    /******************************************************************************************/
+    
+    /* 개설요청 결번 검증   */
+    SYS_TRY(g000_ix_skn_check(ctx));
+
+    /* 중복 검증  */
+    SYS_TRY(h000_ix_dup_check(ctx));
+
+    /*  Decoupling   **************************************************************************/
+    /* EI관리번호 채번     ***********************************************************************/
+    /******************************************************************************************/
+    SYS_TRY(h100_max_msg_no_proc(ctx));
+    /******************************************************************************************/
+
+    /* 저널 생성 번호 */
+    SYS_TRY(i000_ixjrn_insert(ctx));
+
+    /* 호스트 SAF처리  */
+    SYS_TRY(j000_ix_host_saf_prod(ctx));
 
 
     SYS_TREF;
@@ -193,121 +239,113 @@ static int          a000_init_proc(int argc,  char *argv[])
 
 SYS_CATCH:
 
+    switch(rc){
+    case GOB_NRM;
+        /* 대외기관 무응답   */
+        break;
+
+        default:
+        /* 대외기관 에러 응답 전송   */
+        k000_kftc_err_send(ctx);
+        break;
+    }
+
+
     SYS_TREF;
     return ERR_ERR;
 }
 
+
+
 /* ------------------------------------------------------------------------------------------------------------ */
-static int          a100_parse_custom_args((int argc,  char *argv[])
+static int          a000_data_receive(ixn0040_ctx_t *ctx, commbuff_t    *commbuff)
 {
-    int      c;
+    int      rc = ERR_NONE;
 
-    g_sleep_sec = 0.1;
+    SYS_TRSF;
 
-    while((c = getopt(argc, argv, "s:c:a")) != EOF ){
-    /* ----------------------------------------------------------------------------------- */
-    SYS_DBG("GETOPT:%c\n", c);
-    /* ----------------------------------------------------------------------------------- */
-        switch(c){
-        case 's' :
-            strcpy(g_svc_name, optargs);
-            break;
+    /* set commbuff */
+    memset((char *)ctx, 0x00, sizeof(ixn0040_ctx_t));
+    ctx->cb = commbuff;
 
-        case 'c' :
-            strcpy(g_chnl_code, optargs);
-            break;
-
-        case 'a' :
-            strcpy(g_appl_code, optargs);
-            break;
-
-        case '?' :
-            SYS_DBG("unreconized option: -%c %s", optopt, argv[optind]);
-            return ERR_ERR;
-            
-        }
+    if (EXTRECVDATA == NULL) {
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "EXTRECVDATA DATA NOT FOUND");
+        return GOB_NRM;
     }
 
-    /* ----------------------------------------------------------------------------------- */
-    SYS_DBG("g_svc_name         :[%s]", g_svc_name);
-    SYS_DBG("g_chnl_code        :[%s]", g_chnl_code);
-    SYS_DBG("g_appl_code        :[%s]", g_appl_code);
-    SYS_DBG("g_sleep_sec        :[%d]", g_sleep_sec);
-    /* ----------------------------------------------------------------------------------- */
+    /* 입력 채널 clear */
+    SYSICOMM->intl_tx_flag = 0;
 
-    /* 서비스명 검증 */
-    if ((strlen(g_svc_name) == 0) ||
-        (g_svc_name[0])     == 0x20))
-        return ERR_ERR;
+    /* 결제원 응답 데이터 길이 set */
+    ctx->ext_recv_len = sysocbgs(ctx->cb, IDX_EXTRECVDATA);
+    memcpy(ctx->ext_recv_data, EXTRECVDATA, ctx->ext_recv_len);
+
+    /* 결제원 에러 응답 조립여부 초기화 (0:조립하지 않음, 1:조립함.)   */
+    ctx->kftc_err_set = 1;
+
+#ifdef _SIT_DBG
+    PRINT_IX_KFTC_DEBUG(ctx->ext_recv_data);
+#endif
+
+    SYS_TREF;
 
     return ERR_NONE;
 }
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
-int usermain(int argc,  char *argv[])
+static int b000_msg_logging(ixn0040_ctx_t   *ctx, int log_type)
 {
-    int                 rc = ERR_NONE;
-    mqnsend01_ctx_t     _ctx = {0};
-    mqnsend01_ctx_t     *ctx = &ctx;  
+    int                 rc  = ERR_NONE;
+    ixi0230f_t          ixi0230f;
+    commbuff_t          dcb;
 
-    /* initial */
-    rc = a000_init_proc(argc, argv);
-    if (rc == ERR_ERR)
-        tpsvrdown();
 
-    //get channel info 한번 load 하면 다음번에는 안하게 되어있으니까 상관없음. 
-    rc = b100_mqparam_load(ctx);
-    if (rc !=  ERR_NONE) {
-        SYS_DBG("b100_mqparam_load failed ##################### ");
-        ex_syslog(LOG_FATAL, "[APPL_DM] b100_mqparam_load() FAIL [해결방안]시스템담당자 call" );
-        tpsvrdown();
+    SYS_TRSF;
 
+    /* --------------------------- */            
+    /* logging                     */
+    /* KFTC_RECV : KFTC -> UNIX    */
+    /* KFTC_SEND : UNIX -> KFTC    */
+    /* --------------------------- */
+    memset(&ixi0230f,   0x00, sizeof(ixi0230f_t));
+
+    /* 결제원 수신 전문 로깅 */
+    if (log_type == KFTC_RECV_LOG){
+        ixi0230f.in.flag            = 'R';
+        ixi0230f.in.log_type        = 'K';
+        ixi0230f.in.log_len         = ctx->ext_recv_len;
+        memcpy(ixi0230f.in.log_data,  ctx->ext_recv_data, ixi230f.in.log_len);
     }
 
-    /* MQ Initialization    */
-    rc = d100_init_mqcon(ctx);
-    if (rc ==  ERR_NONE) {
-        SYS_DBG("d100_init_mqcon failed STEP 1 ");
-        ex_syslog(LOG_FATAL, "[APPL_DM] d100_init_mqcon() STEP 1 FAIL [해결방안]시스템담당자 call" );
-        tpsvrdown();
+    /* ---------------------------------------------------------------------- */
+    SYS_DBG("b000_msg_logging: len = [%d]", ixi0230f.in.log_len);
+    SYS_DBG("b000_msg_logging: msg = [%s]", ixi0230f.in.log_data);
+    /* ---------------------------------------------------------------------- */
 
+    memset(&dcb,    0x00, sizeof(commbuff_t));
+    rc = sysocbdb(ctx->cb,  &dcb);
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXN0040: b000_msg_logging()"
+                             "COMMBUFF BACKUP ERROR "
+                             "[해결방안]시스템 담당자 call", 
+                             __FILE__);
+        sys_err_init();
+        return ERR_NONE;
     }
 
-    /* never return    */
-    while(1){
+
+
+
+
+
+
+
+
+
+
     
-        /* MQ Initialization    */
-        rc = d100_init_mqcon(ctx);
-        if (rc ==  ERR_NONE) {
-            SYS_DBG("d100_init_mqcon failed STEP 2 ");
-            ex_syslog(LOG_FATAL, "[APPL_DM] d100_init_mqcon() STEP 2 FAIL [해결방안]시스템담당자 call" );
-            continue();
-
-        }
-
-        SYS_DBG("EXMQPARM->schedule_ms[%d]", EXMQPARM->schedule_ms);
-
-        /* MESSAGE DB ==> MQ PUT */
-        rc = e100_get_sendmsg(ctx);
-        if (rc == GOB_NRM) {
-            //tpschedule(-1);
-            //tpschedule(1);
-            tpuschedule(EXMQPARM->schedule_ms * 1000);
-
-        }else if ( rc == ERR_ERR) {
-            SYS_DBG("e100_get_mqmsg failed tpschedule(%d)", EXCEPTION_SLEEP_INTV);
-            tpschedule(EXCEPTION_SLEEP_INTV);
-            continue;
-        }
-
-    }  /* end while loop */
-
-
-
 }
-
-
 /* ------------------------------------------------------------------------------------------------------------ */
 static int   b100_mqparm_load(mqnsend01_ctx_t   *ctx)
 {
