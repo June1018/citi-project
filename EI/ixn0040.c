@@ -98,11 +98,28 @@
  *
  *
  *
+ *
+ *
  */
 
 /* ---------------------------------------------- include files ----------------------------------------------- */
-#include <sytcpgwhead.h>
 #include <syscom.h>
+#include <exdefine.h>
+#include <exmsg1200.h>
+#include <exi0210x.h>
+#include <exi0230x.h>
+#include <exi0250x.h>
+#include <exi4000x.h>
+#include <exparm.h>
+#include <ixdefine.h>
+#include <ixmsgkftc.h>
+#include <ixdetlarea.h>
+#include <ixi0200x.h>
+
+
+
+
+
 #include <fxarg.h>
 #include <mqi0001f.h>
 #include <cmqc.h>
