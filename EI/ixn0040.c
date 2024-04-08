@@ -115,49 +115,52 @@
 #include <ixmsgkftc.h>
 #include <ixdetlarea.h>
 #include <ixi0200x.h>
-
-
-
-
-
-#include <fxarg.h>
-#include <mqi0001f.h>
-#include <cmqc.h>
-#include <exmq.h>
-#include <exmqparam.h>
-#include <exmqmsg_001.h>
-#include <exmqsvc.h>
-#include <mqimsg001.h>
-#include <usrinc/atmi.h>
-#include <usrinc/ucs.h>
+#include <ixi0220x.h>
+#include <ixi1040x.h>
+#include <ixi0110x.h>
+#include <ixi0120f.h>
+#include <ixi0140f.h>
+#include <ixi1060f.h>
+#include <ixi0230f.h>
+#include <ixi0320f.h>
+#include <exi0320f.h>  /* Decoupling */
 #include <sqlca.h>
+
+#define LEN_KTI_FLAG            1
+
 /* ---------------------------------------- constant, macro definitions --------------------------------------- */
-#define EXCEPTION_SLEEP_INTV                3000                        /* EXCEPTION SLEEP Interval 5 min       */
-
-#define EXMQPARM                            (&ctx->exmqparm)
-#define MQMSG001                            (&ctx->exmqmsg_001)
-
 /* ---------------------------------------- structure definitions --------------------------------------------- */
-typedef struct mqnsend01_ctx_s  mqnsend01_ctx_t;
-struct mqnsend01_ctx_s {
-    exmqparm_t      exmqparm;
-    long            is_mq_connected;
-    MQHCONN         mqhconn;
-    MQHOBJ          mqhobj;
-    exmqmsg_001_t   exmqmsg_001;
+typedef struct ixn0040_ctx_s    ixn0040_ctx_t;
+struct ixn0040_ctx_s {
+    commbuff        *cb;  
+
+    int             ext_recv_flag;                  /* 결제원 수신데이터 길이 */
+    int             kftc_err_set;                   /* 결제원 에러 응답 전문조립 여부 */
+    char            host_tx_code[LEN_TX_CODE + 1];  /* 내부 거래코드        */
+    char            ext_recv_data[2000];            /* 대외기관 요청 전문    */
+
+    ixi0220x_t      ixi0220x;
+
+    /* Decoupling ************************************************************/
+    /* kti flag     : exmsg1200->kti_flag를 임시보관하여 사용함                   */
+    /* our_msg_no   : CORE, KTI에서 채번한 관리 일련번호로 exmsg1200->out_msg_no   */
+    /* ei_msg_no    : IXMAX에서 채번한 EI관리일련번호 보관                         */
+    /* acct_type    : exmsg1200->kti_flag의에 값에 따라 조립함                   */
+    /*                b200_max_msg_no_proc에서 조립함                          */
+    /************************************************************************/
+
+    char            kti_flag[LEN_KTI_FLAG + 1];
+    char            out_msg_no[LEN_MQMSG1200_OUT_MSG_NO + 1];
+    char            ei_msg_no[LEN_MQMSG1200_EI_MSG_NO + 1];
+    char            acct_type[LEN_MQMSG1200_CR_ACCT_TYPE +1];   
 
 };
 
+
+
 /* ------------------------------------- exported global variables definitions -------------------------------- */
-char                g_svc_name[32];                     /* G/W 서비스명         */
-char                g_chnl_code[3 + 1];                 /* CHANNEL CODE       */
-char                g_appl_code[2 + 1];                 /* APPL_CODE          */
-int                 g_sleep_sec;  
-
-
 /* ------------------------------------------ exported function  declarations --------------------------------- */
-int                 mqnsend01(commbuff_t    *commbuff);
-static int          a000_initial(int argc,  char *argv[]);
+static int          a000_data_receive(int argc,  char *argv[]);
 static int          a100_parse_custom_args(int argc,  char *argv[]);
 static int          b100_mqparm_load(mqnsend01_ctx_t    *ctx);
 static int          d100_init_mqcon(mqnsend01_ctx_t     *ctx);
