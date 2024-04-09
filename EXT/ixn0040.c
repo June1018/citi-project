@@ -811,9 +811,267 @@ static int h000_ix_dup_check(ixn0040_ctx_t  *ctx)
 
 
 }
+/* Decoupling ------------------------------------------------------------ */
+/* EI대표전문 채번 : 대외기관에 전송하는 전문일련번호 채번                             */
+/* TABLE        : IXMAX                                                    */
+/* 은행코드       : 053                                                      */
+/* 취급거래       : MAX(MAX_OUT_MSG_NO  + 1)                                 */
+/* 개설거래       : MAX(MAX_KFTC_MSG_NO + 1)                                 */
+/* Decoupling ------------------------------------------------------------ */
+static int h100_max_msg_no_proc(ixn0040_ctx_t   *ctx)
+{
+    int                 rc = ERR_NONE;
+    ixi0120f_t          ixi0120f;
+
+    SYS_TRSF;
+    
+    
+    /*------------------------------------------------------------------------ */
+    SYS_DBG("h100_max_msg_no_proc START ");
+    /*------------------------------------------------------------------------ */
+
+    memset(&ixi0120f,   0x00, sizeof(ixi0120f_t));
+
+    ixi0120f.in.in_flag         = 1;    /* 0:취급업무,  1:개설업무  */
+    ixi0120f.in.max_flag        = 1;    /* 0:결번검증,  1:MAX채번  */
+    memcpy(ixi0120f.in.in_host_skn_chk, EXPARM->host_skn_chk,   1); /* 결번 검증 여부 */
+    memcpy(ixi0120f.in.in_kti_flag    , ctx->kti_flag       ,   1); /* 시스템구분 - 0:GCG, 1:ICG  */
+    ixi0120f.in.exmsg1200   = EXMSG1200;
+
+    rc = ix_skn_chk(&ixi0120f);
+
+    if (rc == ERR_ERR){
+        return ERR_ERR;
+    }
+
+    //
+    //sys_tx_commit(TX_CHAINED);
+    /*********************************************************************************/
+    /* IXI0120F.pc를 호출후 채번된 일련번호                                               */
+    /* ctx_ei_msg_no에 조립하여 관련 테이블 생성 및 갱신시 사용된다.                           */
+    /*********************************************************************************/
+    memcpy(ctx->ei_msg_no,  ixi0120f.out.out_max_ei_msg_no, LEN_IXI0120F_MAX_EI_MSG_NO);
+
+    SYS_DBG("ixi0120f CALL AFTER ");
+    SYS_DBG("ctx->ei_msg_no                 :[%s]", ctx->ei_msg_no);
+    SYS_DBG("ixi0120f.out.out_max_ei_msg_no :[%s]", ixi0120f.out.out_max_ei_msg_no);
+
+
+    /*  ---------------------------------------------------------------------- */
+    /* exmsg1200.our_msg_no 를 ctx->out_msg_no에 조립하여 임시보관                  */
+    /* exmsg1200.our_msg_no  금융결제원에 제공되는 번호이어서                          */
+    /* exmsg1200.our_msg_no에는 IXI0120F.pc에서 채번된 일련번호를                    */
+    /* 조립하고, ctx->ei_msg_no는 저널 생성시 our_msg_no에 조립하여                    */
+    /* IXJRN을 생성할떄 사용하려고 함.                                               */
+    /*  ---------------------------------------------------------------------- */
+
+
+
+
+    SYS_DBG("ixi0120f CALL Result ");
+    SYS_DBG("ctx->ei_msg_no                 :[%s]", ctx->ei_msg_no);
+    SYS_DBG("ixi0120f.out.out_max_ei_msg_no :[%s]", ixi0120f.out.out_max_ei_msg_no);
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
+
 /* ------------------------------------------------------------------------------------------------------------ */
+static int i000_ixjrn_insert(ixn0040_ctx_t  *ctx)
+{
+    int                 rc = ERR_NONE;
+    ixi0140x_t          ixi0140x;
+
+    SYS_TRSF;
+
+    /*------------------------------------------------------------------------ */
+    SYS_DSP("i000_ixjrn_insert : host_send_jrn_make[%s]",  EXPARM->host_send_jrn_make);
+    /*------------------------------------------------------------------------ */
+
+    if (EXPARM->host_send_jrn_make[0] != '2')
+        return ERR_NONE;
+
+
+    /* ----------------------------------------------------------------------- */
+    /* JRN 생성                                                                 */
+    /* ----------------------------------------------------------------------- */
+    memset(&ixi0140f,   0x00, sizeof(ixi0140f));
+    ixi0140f.in.exmsg1200       = EXMSG1200;
+    ixi0140f.in.ext_send_data   = ctx->ext_recv_data;
+
+    /*
+     *
+    */
+    memcpy(ixi0140f.in.in_new_flag  ,       "NEW",       , 3); /* NEW JRN 생성, INQ중복검증   */ 
+    memcpy(ixi0140f.in.in_comm_flag ,       "R",         , 1); /* S취급거래    , R개설거래     */
+    memcpy(ixi0140f.in.ei_msg_no    ,    ctx->ei_msg_no  ,10); /* 채번된 EI관리 일련번호        */
+    memcpy(ixi0140f.in.in_orig_ei_msg_no    ,"0000000000",10); /* 원거래 EI관리 일련번호        */
+    memcpy(ixi0140f.in.in_orig_proc_msg_no  ,"0000000000",10); /* 원거래 당행관리 일련번호       */
+
+    /* 결번검증하지 않는 거래는 EI_MSG_NO는 0을 10개 채운다.  */
+    if (EXPARM->host_skn_chk[0] != '1'){
+        memcpy(ixi0140f.in.in_ei_msg_no,    "0000000000" ,10); /* EI대표전문번호              */
+    }
+
+
+    memcpy(ixi0140f.in.in_kti_flag, ctx->kti_flag,  LEN_IXI0140F_KTI_FLAG); /* 시스템구분 0:GCG, 1:ICG  */
+
+    rc = ix_jrn_ins(&ixi0140f);
+
+    switch(rc){
+    case ERR_NONE:
+        break;
+    case TX_DUP:
+        return GOB_ERR;
+    default:
+
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s i000_ixjrn_insert()"
+                             "IXJRN INSERT ERROR"
+                             "[해결방안]ORACLE 담당자 CALL",
+                             __FILE__);
+        /* ------------------------------------------------------- */
+        /* JRN생성의 결과가 error 이면                                 */
+        /* 금융결제원으로 에러전문을 SEND한다.                            */
+        /* ------------------------------------------------------- */
+        ctx->ixi0220x.in.msg_code   = '1';
+        ctx->ixi0220x.in.send_flag  = '4';
+        memcpy(ctx->ixi0220x.in.rspn_code, "413", LEN_RSPN_CODE);
+
+        return ERR_ERR;
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
+
 /* ------------------------------------------------------------------------------------------------------------ */
+static int j000_ix_host_saf_prod(ixn0040_ctx_t  *ctx)
+{
+    int                 rc  = ERR_NONE;
+    ixi1060f_t          ixi1060f;
+
+    SYS_TRSF;
+
+    /*------------------------------------------------------------------------ */
+    SYS_DSP("j000_ix_host_saf_prod : host_send_jrn_make[%s]",  EXPARM->host_send_jrn_make);
+    /*------------------------------------------------------------------------ */    
+
+    if (EXPARM->host_send_jrn_make[0] != '2'){
+
+        /* ----------------------------------------------------------------------- */
+        SYS_DSP("IXHSAF insert skip" );
+        /* ----------------------------------------------------------------------- */
+        
+        return ERR_NONE;
+
+    }
+
+
+    /* ----------------------------------------------------------------------- */
+    SYS_DSP("j000_ix_host_saf_prod : host_send_jrn_make[%s]",  EXPARM->host_send_jrn_make);
+    /* ----------------------------------------------------------------------- */
+
+    /* ----------------------------------------------------------------------- */
+    /* HOST미전송  생성처리                                                        */
+    /* ----------------------------------------------------------------------- */
+    memset(&ixi1060f,   0x00, sizeof(ixi1060f_t));
+    ixi1060f.in.exmsg1200       = EXMSG1200;
+
+    /*
+     *
+    */
+    memcpy(ixi1060f.in.ei_msg_no    ,    ctx->ei_msg_no  ,10); /* 채번된 EI관리 일련번호        */
+    memcpy(ixi1060f.in.in_kti_flag  ,    ctx->kti_flag   , LEN_IXI1060F_KTI_FLAG ); /* 시스템구분 0:GCG, 1:ICG  */
+
+    SYS_TRY(ix_host_saf_prod_prod(&ixi1060f));
+
+#ifdef _DEBUG
+    /*------------------------------------------------------------------------ */
+    SYS_DBG("================================================================");
+    SYS_DBG("      j000_ix_host_saf_prod : EXMSG1200                         ");
+    SYS_DBG("================================================================");
+    PRINT_EXMSG1200(EXMSG1200);
+    PRINT_EXMSG1200_2(EXMSG1200);
+    /*------------------------------------------------------------------------ */
+#endif
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0040: j000_ix_host_saf_prod()"
+                         "SAF INSERT ERROR"
+                         "[해결방안]ORACLE 담당자 CALL",
+                          __FILE__);
+    /* ------------------------------------------------------- */
+    /* 금융결제원으로 에러전문을 SEND한다.                            */
+    /* ------------------------------------------------------- */
+    ctx->ixi0220x.in.msg_code       = '1';
+    ctx->ixi0220x.in.send_flag      = '4';
+    memcpy(ctx->ixi0220x.in.rspn_code, "413", LEN_RSPN_CODE);
+
+    SYS_TREF;
+    return ERR_ERR;
+
+}
 /* ------------------------------------------------------------------------------------------------------------ */
+int static k000_kftc_err_send(ixn0040_ctx_t *ctx)
+{
+    int                 rc  = ERR_NONE;
+    int                 len;
+    char                ext_gw_svc_name[15];
+
+    SYS_TRSF;
+
+    /* ----------------------------------------------------------------------- */
+    /* 결제원 에러응답 전문 조립                                                     */
+    /* ----------------------------------------------------------------------- */
+    if (ctx->kftc_err_set == 1){
+        ctx->ixi0220x.in.ext_recv_data = ctx->ext_recv_data;
+        ix_kftc_err_set(&ctx->ixi0220x);
+    }
+
+    len = ctx->ext_recv_len - 9;
+
+    /* 대외기관 전송데이터 길이 검증     */
+    if (len <= 0){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0020: k000_kftc_err_send()"
+                             "EXT GW LEN ERROR [len=%d]"
+                             "[해결방안]ORACLE 담당자 CALL",
+                             __FILE__, len);
+        return GOB_ERR;
+    }
+
+    /* 대외기관 G/W에 호출하는 방식을 전달하기 위한 값을 set */
+    strcpy(SYSGWINFO->func_name, "X25IXIO");
+    SYSGWINFO->msg_type     = SYSGWINFO_MSG_ETC;        /* 전문종류 방식  */
+    SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_SAF;  /* SAF 방식호출  */
+    SYSGWINFO->rspn_flag    = SYSGWINFO_REPLY;          /* G/W로 부터의 응답   */
+
+    SYSGWINFO->time_val     = utoa2ln(EXPARM->time_val, LEN_EXPARM_TIME_VAL);
+    if (SYSGWINFO->time_val <= 0)                       /* SAF방식 타임 아웃   */
+        SYSGWINFO->time_val = SYSGWINFO_SAF_DFLT_TIMEOUT;
+
+#ifdef _SIT_DBG
+    PRINT_IX_KFTC_DEBUG(ctx->ext_recv_data);
+#endif
+
+    /* output queue 에 데이터 저장  */
+    rc = sysocbsi(ctx->cb, IDX_EXTSENDDATA, &ctx->ext_recv_data[9], len);
+    
+
+
+
+
+
+
+}
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
