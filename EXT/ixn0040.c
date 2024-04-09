@@ -524,15 +524,103 @@ static int f000_msg_format(ixn0040_ctx_t    *ctx)
     exi4000x.in.base_len        = LEN_EXMSG1200;
     exi4000x.in.msg_len         = ctx->ext_recv_len;
 
-    
+    memcpy(exi4000x.in.base_msg,    &exmsg1200,         LEN_EXMSG1200);
+    memcpy(exi4000x.in.msg,         ctx->ext_recv_data, exi4000x.in.msg_len);
+    memcpy(exi4000x.in.appl_code,   IX_CODE,            LEN_APPL_CODE);
+    memcpy(exi4000x.in.tx_code,     EXPARM->tx_code,    LEN_TX_CODE);    
 
+    rc = ex_format(&exi4000x);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_msg_format()"
+                             "FORMAT ERROR: host_tx_code [%s]"
+                             "[해결방안]업무담당자 CALL",
+                             __FILE__, ctx->host_tx_code);
+        goto SYS_CATCH;
+    }
 
+    if (exi4000x.out.msg_len <= 0){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_msg_format()"
+                             "FORMAT ERROR: host_tx_code [%s]"
+                             "[해결방안]업무담당자 CALL",
+                             __FILE__, ctx->host_tx_code);
+        goto SYS_CATCH;
+    }
 
+    /* 전문변환 데이터 1200 bytes */
+    memcpy(&exmsg1200, exi4000x.out.msg, LEN_EXMSG1200);
 
+    /*------------------------------------------------------------------------ */
+    /* 변환된전문을 COMMBUFF에 set                                                 */
+    /*------------------------------------------------------------------------ */
+    rc = sysocbsi(ctx->cb, IDX_EXMSG1200,   &exmsg1200, LEN_EXMSG1200);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_msg_format()"
+                             "COMMBUFF(EXMSG1200) SET ERROR"
+                             "[해결방안]업무담당자 CALL",
+                             __FILE__);
+        goto SYS_CATCH;
+    }
 
+    memcpy(EXMSG1200->tx_code, ctx->host_tx_code, LEN_TX_CODE);
+    utodate1(EXMSG1200->tx_date);
+    utotime1(EXMSG1200->tx_time);
 
+#ifdef _SIT_DBG
+    /* ------------------------------------------------------------------------- */
+    PRINT_EXMSG1200(EXMSG1200);
+    PRINT_EXMSG1200_2(EXMSG1200);
+    /* ------------------------------------------------------------------------- */
+#endif
+
+    SYS_TREF;
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    ctx->ixi0220x.in.msg_code = '1';
+    ctx->ixi0220x.in.msg_code = '4';
+    memcpy(ctx->ixi0220x.in.rspn_code, "413", LEN_RSPN_CODE);
+
+    SYS_TREF;
+    return ERR_ERR;
 
 }
+
+/* ------------------------------------------------------------------------------------------------------------ */
+/* g100 계좌종류구분 체크 신규 추가                                                                                   */
+/* ------------------------------------------------------------------------------------------------------------ */
+static int f100_gcg_icg_acct_chk_proc(ixn0040_ctx_t *ctx)
+{
+    int                 rc = ERR_NONE;
+    char                in_acct_no [16 + 1];
+    char                tmp_acctype[ 1 + 1];
+
+    exi0320f_t          exi0320f;
+
+    SYS_TRSF;
+
+    /****
+     * 계좌종류 구분 체크 FLAG(EXPARM->fil3)
+     * 0:대상아님 (기존처럼 core전송 )
+     * 1:입금계좌 (cr_acct_no)로 계좌구분
+     * 2:출금계좌 (dr_acct_no)로 계좌구분
+     * 3:입금계좌 + 출금계좌(출금계좌기준 전송)
+    */
+    SYS_DBG("EXPARM->fil3=>[%c]", EXPARM->fil3[0]);
+
+    /* host통신여부 검증 */
+    if (EXPARM->fil3[0] == '0')
+
+
+
+
+
+
+
+    
+}
+/* ------------------------------------------------------------------------------------------------------------ */
+
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
