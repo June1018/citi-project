@@ -524,7 +524,7 @@ static int b000_msg_logging(ixn0020_ctx_t   *ctx, int log_type)
     SYS_TREF;
     return ERR_NONE;
     
-}
+} /*--- 4월 10일 이후 작업 시작 ----*/
 /* ------------------------------------------------------------------------------------------------------------ */
 static int c000_kftc_fild_chk(ixn0020_ctx_t *ctx)
 {
