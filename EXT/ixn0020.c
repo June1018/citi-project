@@ -18,6 +18,22 @@
 *
 *
 *
+*
+*
+*
+*
+*
+*
+*
+*
+*
+*
+*
+*
+*
+*
+*
+*
 *   @generated at 2023/06/02 09:30
 *   @history
 *
@@ -26,6 +42,18 @@
 * 
 *
 */
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 /*  @pcode
@@ -55,102 +83,203 @@
  *        z000 : 대외기관 에러응답 송신 
  *
  *        a000 CONTEXT 초기화 
- *                              
- *        b000 수신로그 처리 
+ *             1.context 초기화 
+ *             2.대외기관 수신전문 NULL검증 
+ *             3.대외기관 수신전문 ext_recv_data에 copy
+ *             4.대외기관 에러 응답 전송및 에러 응답 조립여부 FLAG초기화 
+ *                 
+ *        b000 결제원 수신전문 로깅 
  *             1. IX로그테이블 (IXKULOG)에 로그 처리 	
  *        
- *        c000 입력데이터 검증
- *             1. 각 수신전문별 전문 검증 처리 
- *             2. 전문검증 오류시 
+ *        c000 전문유형별 field 체크 
+ *             1. 대외기관 수신전문 필드 검증 
+ *             2. 필드 검증 오류시 
  *                - 대외기관 포맷오류 전문 송신처리 
  *        
- *        d000 대외기관 거래코드를 호스트 거래코드 변환 
- *             1. 호스트 거래코드 GET
- *             2. 거래코드 변환 오류시 대외기관 무응답 
+ *        d000 거래구분 코드 변환 
+ *             1. 대외기관 종별코드, 거래구분코드를 호스트 거래코드 10자리로 변환 
+ *             2. 자기앞 수표 지급 거래는 전문내의 proc_code값에 따라 재요청과 취소응답 구분 
+ *             3. 거래구분코드 변환 에러시 대외기관 에러 응답 송신 
  *
  *        e000 거래파라미터 조회 
- *             1. 호스트 거래코드별 파라메터 조회 
- *             2. 파라메터 조회 오류시 대외기관 무응답 
+ *             1. 거래 파라미터 조회 
+ *             2. 거래 파라미터 조회 에러시 대외기관 에러 응답 송신 
  *     
- *        f000 1200전문 변환
- *             1. 1200전문 초기화 
- *             2. 대외가관 전문을 1200전문으로 변환
- *             3. 1200전문 변환 오류시 대외 기관 에러 응답 전문 조립처리 및 송신처리 
+ *        f000 대외전문을 1200전문으로  변환
+ *             1. 타점권 재연장 거래나 관리전문 응답 수신시 무시 (GOB_NRM 리턴) 
+ *             2. 호스트 원전문 조립 거래가 아니거나 결번 응답시 리턴 처리 
+ *             3. 대외가관 전문을 1200전문으로 변환
+ *             4. 응답코드를 대외기관 응답코드를 내부 에러코드로 변환 및 1200전문에 set
+ *             5. 대외전문을 1200전문으로 변환 에러시 대외기관 에러 응답 송신 
  *
- *        g000 개설 요청 결번 검증 
- *             1. 개설요청 결번 검증 거래가 아니면 리턴처리 
- *             2. 결번 검증 후 commit처리 
- *             3. 낵 요청 결번 검증오류시 대외기관 무응답 
+ *        g000 거래구분코드 검증 및 결번 응답 처리 
+ *             1. 거래코드별 내부 거래 구분 flag 값 set 
+ *             2. 호스트 원전문 조립 거래가 아니거나 결번 응답시 리턴처리 
+ *             3. 수표조회 거래 대외 기관 에러코드 변환 
+ *                - 에러시 대외기관 에러 응답송신 
+ *             4. 결번 응답 거래시 IXKSKN에 해당 결번 DELETE
+ *                - 에러시 대외기관 무응답 
  *      
- *        h000 중복검증 
- *             1. 중복검증 거래가 아니면 리턴 처리 
- *             2. 중복거래인 경우 이중거래 에러 (309)응답전문 조립 처리 및 송신처리 
- *             3. 중복거래가 아니면 정상처리 
- *             4. 기타 DB_ERROR인 경우 은행센터의 system장애 (413) 응답전문 조립처리 및 송신처리 
+ *        h000 대외기관 결번 검증 
+ *             1. 대외기관 전문 관리번호로 결번 검증 
+ *             2. 결번 처리후 commit 중복검증 flag set 
+ *             3. 에러시 대외기관 무응답 
+ *             
+ *        j000 중복거래 검증        
+ *             1. 중복거래 검증 거래가 아니면 리턴처리 
+ *             2. 중복거래인 경우 대외기관 무응답 
+ *             3. 기타 DB ERROR인 경우, 대외기관 에러응답 송신 
  *
- *        h100 EI_MSG_NO채번       
- *             1. 개시 업무에 대한 EI_MSG_NO 최대값 채번 
+ *        k000 최소거래시 원저널 검증 
+ *             1. 취소거래가 아니면 리턴 처리 
+ *             2. 원저널의 취소 상태를 전역변수에 저장 
+ *             3. 원저널 검증 에러시 대외기관 무응답 
  *
- *        i000 저널 생성
- *             1. 저널 생성거래가 아니면 리턴처리 
- *             2. 중복거래시 대외기관 무응답 
- *             3. 저널 생성 에러시 대외기관 에러 응답 전문 조립처리 및 송신처리 
+ *        l000 요구에 대한 응답전문 검증 
+ *             1. 원거래 검증 거래가 아니면 리턴 처리 
+ *             2. 원저널 검증 에러시 대외기관 포맷에러 응답송신 
+ *             3. 요청시 TCP/IP헤더 정보를 COMMBUFF에 set
  *        
- *        j000 호스트 SAF 처리 
- *             1. 호스트 SAF 처리 거래가 아니면 리턴 처리 
- *             2. 호스트 SAF 처리 에러시 대외기관 에러 응답 전문 조립처리 및 송신처리 
+ *        m000 응답코드 검증  
+ *             1. rspn_cmp_code 파라미터 값에 따라 다르게 처리함 
+ *             2. '1': m100_proc_rspn_chk()에서 처리 
+ *             3. 수표조회, 처리결과 조회, 입금 취소 거래인 경우  
+ *              -  IXJRN에서의 응답코드가 불능(TIME OVER)인 경우 무시 
+ *             4. 입금 불능전문을 수신한 경우 불능 저널 생성 
+ *             5. 입금 불능이나 기입금 '309'거래는 불능 저널을 생성.
+ *             6. 취소거래인 경우 
+ *               - 원저널이 취소되지 않았고, 기취소 에러이면 정상취소거래로 처리 
+ *               - 취소거래의 응답코드가 정상이 아니면, 원저널 미반영, 집계 미반영 
+ *        
+ *        m100 입금거래 응답코드 검증
+ *             1. 대외기관 응답코드가 정상인 경우 
+ *               - 저널의 응답코드가 정상이면 무시 
+ *               - 저널의 응답코드가 이중거래이거나 아직 응답전문을 수신하지 않으면 정상처리 
+ *               - 이미 불능응답으로 전문을 수신한 경우 무시 
+ *             2. 대외기관 응답코드가 이중거래 에러인 경우 
+ *               - 저널의 응답코드가 정상이거나 불능이면 무시 
+ *               - 저널의 미완료로 되어 있는경우 , 저널에 반영하고 집계 미반영 
+ *             3. 입금불능전문을 수신한 경우   
+ *               - 순채무한도 에러인 경우 관리전문 수동처리 서비스 호출하여 취급거래 발생하지 않게 함.
+ *               - 저널의 응답코드가 미완료이면 집계 미반영 
+ *               - 저널의 응답코드가 이중거래이이면 저널에 반영, 집계 미반영 
+ *               - 이미 입급불능전문을 수신한 상태이면 무시 
  *
- *        k000 대외기관 에러 응답 처리 
- *             1. 대외기관 에러 응답 전문 조립처리 
- *             2. 대외기관 전송 데이터 길이 검증 
- *             3. 대외기관 전문 송신처리 
- *             4. 대외기관 송신 전문 로깅 
- *             5. 대외기관 에러 응답 처리 에러시 대외기관 무응답 
+ *        n000 원전문 조립 
+ *             1. 원전문 조립거래가 아니면 리턴 처리 
+ *             2. 저널 데이터를 1200전문에 set
+ *             3. 거래코드별 1200전문 조립 
  *
+ *        o000 취소거래시 원저널 반영 
+ *             1. 취소시 원저널 반영거래가 아니면 리턴 처리 
+ *             2. 취소거래시 거래고유번호로 저널 상태를 취소 반영
+ *             3. 취소거래시 원저널 반영 에러인 경우 호스트 에러 응답 송신 
  *
+ *        p000 저널 반영 
+ *             1. 원저널 반영 거래가 아니면 리턴 처리 
+ *             2. 취급응답시 저널 반영 
+ *             3. 대외기관 에러 코드 및 에러 메세지를 저널에 반영 
+ *             4. 변환된 에러 메세지는 호스트로 송신하지 않음 
  *
+ *        q000 저널 생성 
+ *             1. 호스트 송신전  저널 생성 거래가 아니면 리턴 처리 
+ *             2. 대외기관 에러코드 및 에러 메시지를 저널에 반영 
+ *             3. 변환된 에러 메세지는 호스트로 송신하지 않음 
+ *
+ *        r000 집계 반영 
+ *             1. 집계반영 거래가 아니면 리턴 처리 
+ *             2. 집계반영 
+ *
+ *        r100 집계 반영  (IXTOT1)
+ *             1. 집계반영 거래가 아니면 리턴 처리 
+ *             2. 집계반영 
+ *
+ *        r500 HOST전송전 COMMIT
+ *             1. 호스트 송신전 commit 거래만 COMMIT
+ *
+ *        s000 HOST전송
+ *             1. 호스트 통신여부 검증 거래가 아니면 리턴 처리 
+ *             2. 호스트 송신 전문 SET 
+ *             3. 거래 파라미터에서 host로부터 응답을 받을지 여부 SET
+ *             4. 호스트송신 
+ *             5. 호스트송신 에러인 경우 SAF방식 거래는 HOST SAF처리함 
+ *             6. 호스트로 부터 응답을 받는 거래인 경우, 응답 데이터 저장 
+ *               - 호스트 응답 코드가 에러인 경우, HOST SAF처리함 
+ *
+ *        t000 호스트 SAF처리 
+ *             1. HOST SAF거래가 아니면 리턴 처리 
+ *             2. IXHSAF에 생성 
+ *
+ *        x000 순채무한도 에러 서비스 호출 
+ *             1. 순채무한도 에러 서비스 호출 
+ *             2. 에러 발생시에도 정상 리턴 처리  
+ *
+ *        z000 대외기관 에러 응답 송신 
+ *             1. 대외기관 에러 응답 송신 거래가 아니면 리턴 처리 
+ *             2. 대외기관 에러 응답 전문 조립 
+ *             3. 대외기관 응답 송신 
  *
  *
  */
-
 /* ---------------------------------------------- include files ----------------------------------------------- */
 #include <syscom.h>
 #include <exdefine.h>
 #include <exmsg1200.h>
-#include <exi0210x.h>
-#include <exi0230x.h>
 #include <exi0250x.h>
+#include <exi0210x.h>
+#include <exi0280x.h>
 #include <exi4000x.h>
-#include <exparm.h>
+#include <exi0230x.h>
 #include <ixdefine.h>
-#include <ixmsgkftc.h>
 #include <ixdetlarea.h>
+#include <ixmsgkftc.h>
+#include <ixi0230f.h>
+#include <ixi0140f.h>
+#include <ixi0110x.h>
+#include <ixi1100x.h>
+#include <ixi1040x.h>
+#include <ixi1020x.h>
+#include <ixi0180x.h>
+#include <ixi0130f.h>
+#include <ixi0131f.h>  /* Decoupling */
+#include <ixi0320f.h>  /* Decoupling */
 #include <ixi0200x.h>
 #include <ixi0220x.h>
-#include <ixi1040x.h>
-#include <ixi0110x.h>
 #include <ixi0120f.h>
-#include <ixi0140f.h>
 #include <ixi1060f.h>
-#include <ixi0230f.h>
-#include <ixi0320f.h>
-#include <exi0320f.h>  /* Decoupling */
+#include <ixi0150f.h>
+#include <ixi0151f.h>
+#include <vbcomm.h>
+#include <ixjrn.h>
 #include <sqlca.h>
 
 #define LEN_KTI_FLAG            1
 
 /* ---------------------------------------- constant, macro definitions --------------------------------------- */
 /* ---------------------------------------- structure definitions --------------------------------------------- */
-typedef struct ixn0040_ctx_s    ixn0040_ctx_t;
-struct ixn0040_ctx_s {
+typedef struct ixn0020_ctx_s    ixn0020_ctx_t;
+struct ixn0020_ctx_s {
     commbuff        *cb;  
 
-    int             ext_recv_flag;                  /* 결제원 수신데이터 길이 */
-    int             kftc_err_set;                   /* 결제원 에러 응답 전문조립 여부 */
-    char            host_tx_code[LEN_TX_CODE + 1];  /* 내부 거래코드        */
-    char            ext_recv_data[2000];            /* 대외기관 요청 전문    */
+    int             ext_recv_len;                       /* 결제원 응답데이터 길이 */
+    int             kftc_reply;                         /* 결제원 에러 응답여부   */
+    int             kftc_err_set;                       /* 결제원 에러 응답 전문조립 여부 */
+                                                        /* KFTC_SEND_LOG 결제원송신전문 로깅 */
+    long            tx_num;                             /* 거래구분코드         */
+    char            err_msg[LEN_EXMSG1200_ERR_MSG +1];  /* 호스트 에러 메세지    */
+    char            lmt_svc_name[8];                    /* 순채무 한도 에러 처리 서비스명 */
+    char            orig_canc_type[1];                  /* 원 저널의 취소 상태   */
+    char            host_tx_code[LEN_TX_CODE + 1];      /* 내부 거래코드        */
+    char            ext_recv_data[2048];                /* 대외기관 요청 전문    */
 
-    ixi0220x_t      ixi0220x;
+    ixjrn_t         ixjrn;
+    ixi0220x_t      ixi0220x;                           /* 결제원 전문 에러 응답 SET 코드 */
+    exmsg1200_t     exmsg1200;
+
+    char            kti_flag[LEN_KTI_FLAG + 1];         /* 시스템 구분 0:GCG 1:ICG     */
+    char            our_msg_no[LEN_EXMSG1200_OUT_MSG_NO + 1];       /* CORE/KTI의 관리일련 번호 */
+    char            ei_msg_no[LEN_EXMSG1200_EI_MSG_NO + 1];         /* E/I관리 일련번호        */
+ 
 
     /* Decoupling ************************************************************/
     /* kti flag     : exmsg1200->kti_flag를 임시보관하여 사용함                   */
@@ -171,35 +300,35 @@ struct ixn0040_ctx_s {
 
 /* ------------------------------------- exported global variables definitions -------------------------------- */
 /* ------------------------------------------ exported function  declarations --------------------------------- */
-static int          a000_data_receive(ixn0040_ctx_t *ctx, commbuff_t    *commbuff);
-static int          b000_msg_logging(ixn0040_ctx_t *ctx, int log_type);
-static int          c000_kftc_fild_chk(ixn0040_ctx_t *ctx);
-static int          d000_tran_code_conv(ixn0040_ctx_t *ctx);
-static int          e000_exparm_read(ixn0040_ctx_t *ctx);
-static int          f000_msg_format(ixn0040_ctx_t *ctx);
+static int          a000_data_receive(ixn0020_ctx_t *ctx, commbuff_t    *commbuff);
+static int          b000_msg_logging(ixn0020_ctx_t *ctx, int log_type);
+static int          c000_kftc_fild_chk(ixn0020_ctx_t *ctx);
+static int          d000_tran_code_conv(ixn0020_ctx_t *ctx);
+static int          e000_exparm_read(ixn0020_ctx_t *ctx);
+static int          f000_msg_format(ixn0020_ctx_t *ctx);
 /* Decoupling */
 /* KIT FLAG 조회 및 exmsg1200에 조립 */
-static int f100_gcg_icg_acct_chk_proc(ixn0040_ctx_t *ctx)
+static int f100_gcg_icg_acct_chk_proc(ixn0020_ctx_t *ctx)
 /******************************************************************************************/
-static int g000_ix_skn_check(ixn0040_ctx_t *ctx)
-static int h000_ix_dup_check(ixn0040_ctx_t *ctx)
+static int g000_ix_skn_check(ixn0020_ctx_t *ctx)
+static int h000_ix_dup_check(ixn0020_ctx_t *ctx)
 /* Decoupling */
 /* EI_MSG_NO 최대값 + 1조립  */
 /******************************************************************************************/
-static int h100_max_msg_no_proc(ixn0040_ctx_t *ctx)
+static int h100_max_msg_no_proc(ixn0020_ctx_t *ctx)
 /******************************************************************************************/
-static int i000_ixjrn_insert(ixn0040_ctx_t *ctx)
-static int j000_ix_host_saf_prod(ixn0040_ctx_t *ctx)
-static int k000_kftc_err_send(ixn0040_ctx_t *ctx)
+static int i000_ixjrn_insert(ixn0020_ctx_t *ctx)
+static int j000_ix_host_saf_prod(ixn0020_ctx_t *ctx)
+static int k000_kftc_err_send(ixn0020_ctx_t *ctx)
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
-int ixn0040(commbuff_t  *commbuff)
+int ixn0020(commbuff_t  *commbuff)
 {
 
     int                 rc = ERR_NONE;
-    ixn0040_ctx_t       _ctx;  
-    ixn0040_ctx_t       *ctx = &_ctx;   
+    ixn0020_ctx_t       _ctx;  
+    ixn0020_ctx_t       *ctx = &_ctx;   
 
     SYS_TRSF;
 
@@ -269,14 +398,14 @@ SYS_CATCH:
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int          a000_data_receive(ixn0040_ctx_t *ctx, commbuff_t    *commbuff)
+static int          a000_data_receive(ixn0020_ctx_t *ctx, commbuff_t    *commbuff)
 {
     int      rc = ERR_NONE;
 
     SYS_TRSF;
 
     /* set commbuff */
-    memset((char *)ctx, 0x00, sizeof(ixn0040_ctx_t));
+    memset((char *)ctx, 0x00, sizeof(ixn0020_ctx_t));
     ctx->cb = commbuff;
 
     if (EXTRECVDATA == NULL) {
@@ -305,7 +434,7 @@ static int          a000_data_receive(ixn0040_ctx_t *ctx, commbuff_t    *commbuf
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int b000_msg_logging(ixn0040_ctx_t   *ctx, int log_type)
+static int b000_msg_logging(ixn0020_ctx_t   *ctx, int log_type)
 {
     int                 rc  = ERR_NONE;
     ixi0230f_t          ixi0230f;
@@ -343,7 +472,7 @@ static int b000_msg_logging(ixn0040_ctx_t   *ctx, int log_type)
     memset(&dcb,    0x00, sizeof(commbuff_t));
     rc = sysocbdb(ctx->cb,  &dcb);
     if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXN0040: b000_msg_logging()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s ixn0020: b000_msg_logging()"
                              "COMMBUFF BACKUP ERROR "
                              "[해결방안]시스템 담당자 call", 
                              __FILE__);
@@ -353,7 +482,7 @@ static int b000_msg_logging(ixn0040_ctx_t   *ctx, int log_type)
 
      rc = sysocbsi(&dcb, IDX_EXMSG1200, ixi0230f, sizeof(ixi0230f));
     if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXN0040: b000_msg_logging()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s ixn0020: b000_msg_logging()"
                              "COMMBUFF BACKUP ERROR "
                              "[해결방안]시스템 담당자 call", 
                              __FILE__);
@@ -364,7 +493,7 @@ static int b000_msg_logging(ixn0040_ctx_t   *ctx, int log_type)
 
      rc = sys_tpcall("IXN0230F", &dcb, TPNOREPLY | TPNOTRAN);
     if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXN0040: b000_msg_logging()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s ixn0020: b000_msg_logging()"
                              "IXI0230F 서비스호출 ERROR [%d:%d] "
                              "[해결방안]TMAX 담당자 call", 
                              __FILE__, tperrno, sys_err_code());
@@ -379,7 +508,7 @@ static int b000_msg_logging(ixn0040_ctx_t   *ctx, int log_type)
     
 }
 /* ------------------------------------------------------------------------------------------------------------ */
-static int c000_kftc_fild_chk(ixn0040_ctx_t *ctx)
+static int c000_kftc_fild_chk(ixn0020_ctx_t *ctx)
 {
 
     int                 rc = ERR_NONE;
@@ -410,7 +539,7 @@ SYS_CATCH:
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int d000_tran_code_conv(ixn0040_ctx_t    *ctx)
+static int d000_tran_code_conv(ixn0020_ctx_t    *ctx)
 {
     int                 rc  = ERR_NONE;
     exi0250x_t          exi0250x;
@@ -434,7 +563,7 @@ static int d000_tran_code_conv(ixn0040_ctx_t    *ctx)
 
     rc = ex_tran_code_conv(&exi0250x);
     if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXN0040: d00_tran_code_conv():"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s ixn0020: d00_tran_code_conv():"
                              "거래코드 변환 ERROR : code/msg[%d:%s]"
                              "[해결방안] IX담당자 CALL" ,
                              __FILE__, sys_err_code, sys_err_msg());
@@ -457,7 +586,7 @@ static int d000_tran_code_conv(ixn0040_ctx_t    *ctx)
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int e000_exparm_read(ixn0040_ctx_t   *ctx)
+static int e000_exparm_read(ixn0020_ctx_t   *ctx)
 {
     int                 rc  = ERR_NONE;
     exi0210x_t          exi0210x;
@@ -502,7 +631,7 @@ static int e000_exparm_read(ixn0040_ctx_t   *ctx)
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int f000_msg_format(ixn0040_ctx_t    *ctx)
+static int f000_msg_format(ixn0020_ctx_t    *ctx)
 {
     int                 rc  = ERR_NONE;
     ixi1040x_t          ixi1040x;
@@ -600,7 +729,7 @@ SYS_CATCH:
 /* ------------------------------------------------------------------------------------------------------------ */
 /* g100 계좌종류구분 체크 신규 추가                                                                                   */
 /* ------------------------------------------------------------------------------------------------------------ */
-static int f100_gcg_icg_acct_chk_proc(ixn0040_ctx_t *ctx)
+static int f100_gcg_icg_acct_chk_proc(ixn0020_ctx_t *ctx)
 {
     int                 rc = ERR_NONE;
     char                in_acct_no [16 + 1];
@@ -700,7 +829,7 @@ static int f100_gcg_icg_acct_chk_proc(ixn0040_ctx_t *ctx)
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int g000_ix_skn_check(ixn0040_ctx_t  *ctx)
+static int g000_ix_skn_check(ixn0020_ctx_t  *ctx)
 {
     int                 rc  = ERR_NONE;
     ixi0120f_t          ixi0120f;
@@ -745,7 +874,7 @@ SYS_CATCH:
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int h000_ix_dup_check(ixn0040_ctx_t  *ctx)
+static int h000_ix_dup_check(ixn0020_ctx_t  *ctx)
 {
     int                 rc  = ERR_NONE;
     char                err_code[LEN_ERR_CODE + 1];
@@ -829,7 +958,7 @@ static int h000_ix_dup_check(ixn0040_ctx_t  *ctx)
 /* 취급거래       : MAX(MAX_OUT_MSG_NO  + 1)                                 */
 /* 개설거래       : MAX(MAX_KFTC_MSG_NO + 1)                                 */
 /* Decoupling ------------------------------------------------------------ */
-static int h100_max_msg_no_proc(ixn0040_ctx_t   *ctx)
+static int h100_max_msg_no_proc(ixn0020_ctx_t   *ctx)
 {
     int                 rc = ERR_NONE;
     ixi0120f_t          ixi0120f;
@@ -890,7 +1019,7 @@ static int h100_max_msg_no_proc(ixn0040_ctx_t   *ctx)
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int i000_ixjrn_insert(ixn0040_ctx_t  *ctx)
+static int i000_ixjrn_insert(ixn0020_ctx_t  *ctx)
 {
     int                 rc = ERR_NONE;
     ixi0140x_t          ixi0140x;
@@ -960,7 +1089,7 @@ static int i000_ixjrn_insert(ixn0040_ctx_t  *ctx)
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int j000_ix_host_saf_prod(ixn0040_ctx_t  *ctx)
+static int j000_ix_host_saf_prod(ixn0020_ctx_t  *ctx)
 {
     int                 rc  = ERR_NONE;
     ixi1060f_t          ixi1060f;
@@ -1032,7 +1161,7 @@ SYS_CATCH:
 
 }
 /* ------------------------------------------------------------------------------------------------------------ */
-int static k000_kftc_err_send(ixn0040_ctx_t *ctx)
+int static k000_kftc_err_send(ixn0020_ctx_t *ctx)
 {
     int                 rc  = ERR_NONE;
     int                 len;
