@@ -424,15 +424,20 @@ static int          a000_data_receive(ixn0020_ctx_t *ctx, commbuff_t    *commbuf
         return GOB_NRM;
     }
 
-    /* 입력 채널 clear */
-    SYSICOMM->intl_tx_flag = 0;
-
-    /* 결제원 응답 데이터 길이 set */
+    /* 결제원 응답 데이터 길이 */
     ctx->ext_recv_len = sysocbgs(ctx->cb, IDX_EXTRECVDATA);
-    memcpy(ctx->ext_recv_data, EXTRECVDATA, ctx->ext_recv_len);
+    memcpy(ctx->ext_recv_data,  EXTRECVDATA, ctx->ext_recv_len);
+
+    /* 결제원 에러 응답 전송 여부 초기화  */
+    ctx->kftc_reply = 0;
 
     /* 결제원 에러 응답 조립여부 초기화 (0:조립하지 않음, 1:조립함.)   */
     ctx->kftc_err_set = 1;
+
+    /* 입력 채널 clear */
+    SYSICOMM->intl_tx_flag = 0;
+
+    memset(ctx->err_msg, 0x20, LEN_EXMSG1200_ERR_MSG);
 
 #ifdef _SIT_DBG
     PRINT_IX_KFTC_DEBUG(ctx->ext_recv_data);
@@ -454,6 +459,12 @@ static int b000_msg_logging(ixn0020_ctx_t   *ctx, int log_type)
 
     SYS_TRSF;
 
+
+    /* ---------------------------------------------------------------------- */
+    SYS_DBG("b000_msg_logging: len = [%d]", ixi0230f.in.log_len);
+    SYS_DBG("b000_msg_logging: msg = [%s]", ixi0230f.in.log_data);
+    /* ---------------------------------------------------------------------- */
+
     /* --------------------------- */            
     /* logging                     */
     /* KFTC_RECV : KFTC -> UNIX    */
@@ -472,13 +483,9 @@ static int b000_msg_logging(ixn0020_ctx_t   *ctx, int log_type)
     else{
         ixi0230f.in.flag            = 'S';
         ixi0230f.in.log_type        = 'K';
-        ixi0230f.in.log_len         = sysocbgs(ctx->cb, IDX_EXTSENDDATA);
+        ixi0230f.in.log_len         = ctx->ext_recv_len - 9;
         memcpy(ixi0230f.in.log_data,  EXTSENDDATA, ixi0230f.in.log_len );        
     }
-    /* ---------------------------------------------------------------------- */
-    SYS_DBG("b000_msg_logging: len = [%d]", ixi0230f.in.log_len);
-    SYS_DBG("b000_msg_logging: msg = [%s]", ixi0230f.in.log_data);
-    /* ---------------------------------------------------------------------- */
 
     memset(&dcb,    0x00, sizeof(commbuff_t));
     rc = sysocbdb(ctx->cb,  &dcb);
