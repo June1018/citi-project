@@ -276,50 +276,39 @@ struct ixn0020_ctx_s {
     ixi0220x_t      ixi0220x;                           /* 결제원 전문 에러 응답 SET 코드 */
     exmsg1200_t     exmsg1200;
 
-    char            kti_flag[LEN_KTI_FLAG + 1];         /* 시스템 구분 0:GCG 1:ICG     */
-    char            our_msg_no[LEN_EXMSG1200_OUT_MSG_NO + 1];       /* CORE/KTI의 관리일련 번호 */
-    char            ei_msg_no[LEN_EXMSG1200_EI_MSG_NO + 1];         /* E/I관리 일련번호        */
- 
-
-    /* Decoupling ************************************************************/
-    /* kti flag     : exmsg1200->kti_flag를 임시보관하여 사용함                   */
-    /* our_msg_no   : CORE, KTI에서 채번한 관리 일련번호로 exmsg1200->out_msg_no   */
-    /* ei_msg_no    : IXMAX에서 채번한 EI관리일련번호 보관                         */
-    /* acct_type    : exmsg1200->kti_flag의에 값에 따라 조립함                   */
-    /*                b200_max_msg_no_proc에서 조립함                          */
-    /************************************************************************/
-
     char            kti_flag[LEN_KTI_FLAG + 1];
     char            out_msg_no[LEN_MQMSG1200_OUT_MSG_NO + 1];
     char            ei_msg_no[LEN_MQMSG1200_EI_MSG_NO + 1];
     char            acct_type[LEN_MQMSG1200_CR_ACCT_TYPE +1];   
 
+
 };
-
-
 
 /* ------------------------------------- exported global variables definitions -------------------------------- */
 /* ------------------------------------------ exported function  declarations --------------------------------- */
-static int          a000_data_receive(ixn0020_ctx_t *ctx, commbuff_t    *commbuff);
-static int          b000_msg_logging(ixn0020_ctx_t *ctx, int log_type);
-static int          c000_kftc_fild_chk(ixn0020_ctx_t *ctx);
-static int          d000_tran_code_conv(ixn0020_ctx_t *ctx);
-static int          e000_exparm_read(ixn0020_ctx_t *ctx);
-static int          f000_msg_format(ixn0020_ctx_t *ctx);
-/* Decoupling */
-/* KIT FLAG 조회 및 exmsg1200에 조립 */
-static int f100_gcg_icg_acct_chk_proc(ixn0020_ctx_t *ctx)
-/******************************************************************************************/
-static int g000_ix_skn_check(ixn0020_ctx_t *ctx)
-static int h000_ix_dup_check(ixn0020_ctx_t *ctx)
-/* Decoupling */
-/* EI_MSG_NO 최대값 + 1조립  */
-/******************************************************************************************/
-static int h100_max_msg_no_proc(ixn0020_ctx_t *ctx)
-/******************************************************************************************/
-static int i000_ixjrn_insert(ixn0020_ctx_t *ctx)
-static int j000_ix_host_saf_prod(ixn0020_ctx_t *ctx)
-static int k000_kftc_err_send(ixn0020_ctx_t *ctx)
+static int  a000_data_receive(ixn0020_ctx_t *ctx, commbuff_t    *commbuff);
+static int  b000_msg_logging(ixn0020_ctx_t *ctx, int log_type);
+static int  c000_ix_kftc_fild_val(ixn0020_ctx_t *ctx);
+static int  d000_tran_code_conv(ixn0020_ctx_t *ctx);
+static int  e000_exparm_read(ixn0020_ctx_t *ctx);
+static int  f000_exmsg1200_make(ixn0020_ctx_t *ctx);
+static int  g000_tx_code_check(ixn0020_ctx_t *ctx);
+static int  h000_ix_skn_check(ixn0020_ctx_t *ctx);
+static int  j000_ix_dup_check(ixn0020_ctx_t *ctx);
+static int  k000_canc_orig_chk(ixn0020_ctx_t *ctx);
+static int  l000_proc_rspn_chk(ixn0020_ctx_t *ctx);
+static int  m000_rspn_code_check(ixn0020_ctx_t *ctx);
+static int  m100_proc_rspn_chk(ixn0020_ctx_t *ctx);
+static int  n000_ix_host_orig_msg_make(ixn0020_ctx_t *ctx);
+static int  o000_ix_canc_orig_update(ixn0020_ctx_t *ctx);
+static int  p000_ixjrn_update(ixn0020_ctx_t *ctx);
+static int  q000_ixjrn_insert(ixn0020_ctx_t *ctx);
+static int  r000_ix_tot_proc(ixn0020_ctx_t *ctx);
+static int  r100_ix_tot_proc(ixn0020_ctx_t *ctx);
+static int  r500_host_send_commit(ixn0020_ctx_t *ctx);
+static int  t000_ix_host_saf_prod(ixn0020_ctx_t *ctx);
+static int  x000_msg_svc_call(ixn0020_ctx_t *ctx);
+static int  z000_error_proc(ixn0020_ctx_t *ctx);
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
