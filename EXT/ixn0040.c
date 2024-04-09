@@ -449,9 +449,90 @@ static int d000_tran_code_conv(ixn0040_ctx_t    *ctx)
 static int e000_exparm_read(ixn0040_ctx_t   *ctx)
 {
     int                 rc  = ERR_NONE;
+    exi0210x_t          exi0210x;
+
+    SYS_TRSF;
+
+    /*------------------------------------------------------------------------ */
+    SYS_DSP(" e000_exparm_read: tx_code [%s]", ctx->host_tx_code);
+    /*------------------------------------------------------------------------ */
+
+    /*------------------------------------------------------------------------ */
+    /* EXPARM TABLE LOAD                                                       */
+    /*------------------------------------------------------------------------ */
+    memset(&exi0210x,   0x00, sizeof(exi0210x_t));
+    memcpy(exi0210x.in.appl_code, IX_CODE           , LEN_APPL_CODE);
+    memcpy(exi0210x.in.tx_code  , ctx->host_tx_code , LEN_TX_CODE);
+
+    rc = ex_parm_load(&exi0210x);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s e000_exparm_read(): 거래코드 Loading Error"
+                             "host_tx_code/code/msg [%s:%d:%s]"
+                             "[해결방안] 업무담당자 CALL",
+                             __FILE__, ctx->host_tx_code, sys_err_code(), sys_err_msg());
+        return GOB_NRM;
+    }
+
+    /* exparm을 commbuff에 저장 */
+    rc = sysocbsi(ctx->cb, IDX_EXPARM, &exi0210x.out.exparm, sizeof(exparm_t));
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s e000_exparm_read():"
+                             "COMMBUFF(EXPARM) SET ERROR host_tx_code[%s]"
+                             "[해결방안] 업무담당자 CALL",
+                             __FILE__, ctx->host_tx_code);
+        return GOB_NRM;
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
 
 }
+
 /* ------------------------------------------------------------------------------------------------------------ */
+static int f000_msg_format(ixn0040_ctx_t    *ctx)
+{
+    int                 rc  = ERR_NONE;
+    ixi1040x_t          ixi1040x;
+    exi4000x_t          exi4000x;
+    exmsg1200_t         exmsg1200;
+
+    SYS_TRSF;
+
+    /*------------------------------------------------------------------------ */
+    SYS_DSP(" f000_msg_format: host_msg_make [%s]", EXPARM->host_msg_make);
+    /*------------------------------------------------------------------------ */
+
+    if (EXPARM->host_msg_make[0] != '1')
+        return ERR_NONE;
+
+    /*------------------------------------------------------------------------ */
+    /* 1200전문 초기화                                                           */
+    /*------------------------------------------------------------------------ */
+    memset(&ixi1040x, 0x00, sizeof(ixi1040x_t));
+    ixi1040x.in.exmsg1200   = &exmsg1200;
+    ix_ex1200_init(&ixi1040x);
+
+    /*------------------------------------------------------------------------ */
+    /* 호스트전문으로 FORMAT                                                      */
+    /*------------------------------------------------------------------------ */
+    memset(&exi4000x,   0x00,   sizeof(exi4000x_t));
+    exi4000x.in.type            = EXI4000X_REQ_MAPP;
+    exi4000x.in.inp_conv_flag   = EXI4000X_NULL_CONV;
+    exi4000x.in.out_conv_flag   = EXI4000X_NULL_CONV;
+    exi4000x.in.base_len        = LEN_EXMSG1200;
+    exi4000x.in.msg_len         = ctx->ext_recv_len;
+
+    
+
+
+
+
+
+
+
+}
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
