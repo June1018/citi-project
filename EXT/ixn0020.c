@@ -306,6 +306,7 @@ static int  q000_ixjrn_insert(ixn0020_ctx_t *ctx);
 static int  r000_ix_tot_proc(ixn0020_ctx_t *ctx);
 static int  r100_ix_tot_proc(ixn0020_ctx_t *ctx);
 static int  r500_host_send_commit(ixn0020_ctx_t *ctx);
+static int  s000_host_send(ixn0020_ctx_t *ctx);
 static int  t000_ix_host_saf_prod(ixn0020_ctx_t *ctx);
 static int  x000_msg_svc_call(ixn0020_ctx_t *ctx);
 static int  z000_error_proc(ixn0020_ctx_t *ctx);
@@ -324,43 +325,65 @@ int ixn0020(commbuff_t  *commbuff)
     /* CONTEXT 초기화  */
     SYS_TRY(a000_data_receive(ctx, commbuff));
 
-    /* 입력전문 LOGGING  */
+    /* 결제원 수신 전문 LOGGING  */
     SYS_TRY(b000_msg_logging(ctx, KFTC_RECV_LOG));
 
-    /* 입력 데이터 검증  */
+    /* 전문유형별 field 체크   */
     SYS_TRY(c000_kftc_fild_chk(ctx));
 
-    /* 대외기관 거래 코드를 호스트 거래코드 변환   */
+    /* 거래구분코드 변환                    */  
     SYS_TRY(d000_tran_code_conv(ctx));
 
-    /* 거래파라메타 조회   */
+    /* 거래파라미터 조회                    */ 
     SYS_TRY(e000_exparm_read(ctx));
 
-    /* 1200전문 변환   */
-    SYS_TRY(f000_msg_format(ctx));
+    /* 대외전문을 1200전문으로  전환          */ 
+    SYS_TRY(f000_exmsg1200_make(ctx));
 
-    /* Decoupling     */
-    /* 계좌종류 구분 코드 */
-    SYS_TRY(f100_gcg_icg_acct_chk_proc(ctx));
-    /******************************************************************************************/
-    
-    /* 개설요청 결번 검증   */
-    SYS_TRY(g000_ix_skn_check(ctx));
+    /* 거래구분코드 검증및 결번 응답 처리        */
+    SYS_TRY(g000_tx_code_check(ctx));
 
-    /* 중복 검증  */
-    SYS_TRY(h000_ix_dup_check(ctx));
+    /* 대외기관 결번 검증 */                       
+    SYS_TRY(h000_ix_skn_check(ctx));
 
-    /*  Decoupling   **************************************************************************/
-    /* EI관리번호 채번     ***********************************************************************/
-    /******************************************************************************************/
-    SYS_TRY(h100_max_msg_no_proc(ctx));
-    /******************************************************************************************/
+    /* 중복거래 검증                    */ 
+    SYS_TRY(j000_ix_dup_check(ctx));
 
-    /* 저널 생성 번호 */
-    SYS_TRY(i000_ixjrn_insert(ctx));
+    /* 최소 거래시 원저널 검증 */                      
+    SYS_TRY(k000_canc_orig_chk(ctx));
 
-    /* 호스트 SAF처리  */
-    SYS_TRY(j000_ix_host_saf_prod(ctx));
+    /* 요구에 대한 응답전문 검증                    */ 
+    SYS_TRY(l000_proc_rspn_chk(ctx));
+
+    /* 응답코드 검증            */  
+    SYS_TRY(m000_rspn_code_check(ctx));
+
+    /* 원전문을 조립                    */ 
+    SYS_TRY(n000_ix_host_orig_msg_make(ctx));
+
+    /* 취소거래시 원저널 update */  
+    SYS_TRY(o000_ix_canc_orig_update(ctx));
+
+    /* 저널 update       */
+    SYS_TRY(p000_ixjrn_update(ctx));
+
+    /* 저널 생성                    */ 
+    SYS_TRY(q000_ixjrn_insert(ctx));
+
+    /* 집계 반영                    */ 
+    SYS_TRY(r000_ix_tot_proc(ctx));
+
+    /* 집계 반영  (IXTOT)           */ 
+    SYS_TRY(r100_ix_tot_proc(ctx));
+
+    /* HOST 전송전 commit           */ 
+    SYS_TRY(r500_host_send_commit(ctx));
+
+    /* HOST전송         */  
+    SYS_TRY(s000_host_send(ctx));
+
+    /* 호스트 SAF처리 */                       
+    SYS_TRY(t000_ix_host_saf_prod(ctx));
 
 
     SYS_TREF;
@@ -368,22 +391,21 @@ int ixn0020(commbuff_t  *commbuff)
 
 SYS_CATCH:
 
-    switch(rc){
-    case GOB_NRM;
-        /* 대외기관 무응답   */
-        break;
+    if (rc == GOB_NRM)
+        return ERR_NONE;
 
-        default:
-        /* 대외기관 에러 응답 전송   */
-        k000_kftc_err_send(ctx);
-        break;
+    /* 결제원 에러 응답 처리   */
+    z000_error_proc(ctx);
+    if (rc == ERR_ERR){
+        return ERR_ERR;
     }
 
+    /* 결제원 송신전문 로깅   */
+    b000_msg_logging(ctx, KFTC_SEND_LOG);
 
     SYS_TREF;
     return ERR_ERR;
 }
-
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
