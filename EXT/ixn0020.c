@@ -409,7 +409,7 @@ SYS_CATCH:
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int          a000_data_receive(ixn0020_ctx_t *ctx, commbuff_t    *commbuff)
+static int  a000_data_receive(ixn0020_ctx_t *ctx, commbuff_t    *commbuff)
 {
     int      rc = ERR_NONE;
 
