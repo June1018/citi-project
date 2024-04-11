@@ -524,9 +524,9 @@ static int b000_msg_logging(ixn0020_ctx_t   *ctx, int log_type)
     SYS_TREF;
     return ERR_NONE;
     
-} /*--- 4월 10일 이후 작업 시작 ----*/
+}
 /* ------------------------------------------------------------------------------------------------------------ */
-static int c000_kftc_fild_chk(ixn0020_ctx_t *ctx)
+static int c000_ix_kftc_fild_val(ixn0020_ctx_t *ctx)
 {
 
     int                 rc = ERR_NONE;
@@ -536,7 +536,6 @@ static int c000_kftc_fild_chk(ixn0020_ctx_t *ctx)
 
     memset(&ixi0200x, 0x00, sizeof(ixi0200x_t));
     ixi0200x.in.ext_recv_data = ctx->ext_recv_data;
-
     /* ------------------------------------------------------------------------- */
     /* 필드 validation  check                                                     */
     /* ------------------------------------------------------------------------- */
@@ -545,23 +544,19 @@ static int c000_kftc_fild_chk(ixn0020_ctx_t *ctx)
     SYS_TREF;
     return ERR_NONE;
 
-
 SYS_CATCH:
 
-    /* 결제원 에러 응답 조립하지 않음. */
+    ctx->kftc_reply;
     ctx->kftc_err_set = 0;
 
     SYS_TREF;
     return ERR_ERR;
-
 }
-
 /* ------------------------------------------------------------------------------------------------------------ */
 static int d000_tran_code_conv(ixn0020_ctx_t    *ctx)
 {
     int                 rc  = ERR_NONE;
     exi0250x_t          exi0250x;
-    ixmsg0200a_t        ix0200a;
 
     SYS_TRSF;
 
@@ -572,40 +567,73 @@ static int d000_tran_code_conv(ixn0020_ctx_t    *ctx)
     /*------------------------------------------------------------------------ */
     memset(&exi0250x, 0x00, sizeof(exi0250x_t));
     exi0250x.in.conv_flag       = k;  
-    exi0250x.in.ext_recv_data   = ctx->ext_recv_data;
 
     memcpy(exi0250x.in.appl_code,   IX_CODE,            LEN_APPL_CODE);
     memcpy(exi0250x.in.tx_flag  ,   ix0200a->send_flag, LEN_EXI0250X_TX_FLAG);
     memcpy(exi0250x.in.msg_type ,   ix0200a->msg_code,  LEN_MSG_TYPE);
     memcpy(exi0250x.in.kftc_tx_code,ix0200a->appl_code, 3);
+    exi0250x.in.ext_recv_data   = ctx->ext_recv_data;
 
-    rc = ex_tran_code_conv(&exi0250x);
-    if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s ixn0020: d00_tran_code_conv():"
-                             "거래코드 변환 ERROR : code/msg[%d:%s]"
-                             "[해결방안] IX담당자 CALL" ,
-                             __FILE__, sys_err_code, sys_err_msg());
-        return GOB_NRM;
-    }
+    SYS_TRY(ex_tran_code_conv(&exi0250x));
 
-    
+    if (utochksp(exi0250x.out.tx_code, LEN_TX_CODE) == SYS_TRUE)
+        goto SYS_CATCH;
 
     memcpy(ctx->host_tx_code, exi0250x.out.tx_code, LEN_TX_CODE);
 
     /*------------------------------------------------------------------------ */
-    SYS_DSP(" d000_tran_code_conv:host_tx_code [%s]", ctx->host_tx_code);
+    /* 타행자기 앞수표 지급                                                         */
+    /* proc_code = 02 : 타행자기앞 수표 지급재요청 응답 (취급)                          */
+    /* proc_code = 03 : 타행자기앞 수표 지급취소응답 (창구, 취급)                       */
+    /*------------------------------------------------------------------------ */
+    /* proc_code 재정리                                                         */
+    /* proc_code = 01 : 타행자기앞 수표 지급재요청응답 (취급)                          */
+    /* proc_code = 02 : 타행자기앞 지급확인 조회 응답  (취급)                          */
+    /* proc_code = 03 : 타행자기앞 지급취소 응답 (청구, 취급)                          */
+    /*------------------------------------------------------------------------ */
+
+    if (memcmp(ctx->host_tx_code, "3089", 4) == 0){
+        if (memcmp(&(ctx->ext_recv_data[96]), "01", 2) == 0){
+            memcpy(ctx->host_tx_code,  "3089000100", LEN_TX_CODE);
+
+        }else if (memcmp(&(ctx->ext_recv_data[96]), "02", 2) == 0){
+            memcpy(ctx->host_tx_code,  "3189000100", LEN_TX_CODE);
+
+        }else if (memcmp(&(ctx->ext_recv_data[96]), "03", 2) == 0){
+            memcpy(ctx->host_tx_code,  "3189000000", LEN_TX_CODE);
+        }
+    }
+
+    /*------------------------------------------------------------------------ */
+    SYS_DBG("d000_tran_code_conv: host_tx_code[%s]" , ctx->host_tx_code );
     /*------------------------------------------------------------------------ */
 
     SYS_TREF;
 
-    return ERR_ERR;
+    return ERR_NONE;
 
+
+SYS_CATCH:
+
+    ex_syslog(LOG_ERROR, "[APPL_DM] % 거래코드 변환ERROR"
+                         "msg_type/kftc_tx_code [%s%s]"
+                         "[해결방안]업무담당자 call"),
+                         __FILE__, exi0250x.in.msg_type, exi0250x.in.kftc_tx_code);
+
+    ctx->ixi0220x.in.msg_code   = '1';
+    ctx->ixi0220x.in.send_flag  = '2';
+    memcpy(ctx->ixi0220x.in.rspn_code, "413", LEN_RSPN_CODE);
+    ctx->kftc_reply = '1';
+
+    SYS_TREF;
+    return ERR_ERR;
 
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
 static int e000_exparm_read(ixn0020_ctx_t   *ctx)
 {
+
     int                 rc  = ERR_NONE;
     exi0210x_t          exi0210x;
 
@@ -628,7 +656,11 @@ static int e000_exparm_read(ixn0020_ctx_t   *ctx)
                              "host_tx_code/code/msg [%s:%d:%s]"
                              "[해결방안] 업무담당자 CALL",
                              __FILE__, ctx->host_tx_code, sys_err_code(), sys_err_msg());
-        return GOB_NRM;
+        ctx->ixi0220x.in.msg_code   = '1';
+        ctx->ixi0220x.in.send_flag  = '2';
+        memcpy(ctx->ixi0220x.in.rspn_code, "413", LEN_RSPN_CODE);
+        ctx->kftc_reply = 1;
+        return ERR_ERR;
     }
 
     /* exparm을 commbuff에 저장 */
@@ -638,13 +670,17 @@ static int e000_exparm_read(ixn0020_ctx_t   *ctx)
                              "COMMBUFF(EXPARM) SET ERROR host_tx_code[%s]"
                              "[해결방안] 업무담당자 CALL",
                              __FILE__, ctx->host_tx_code);
-        return GOB_NRM;
+        ctx->ixi0220x.in.msg_code   = '1';
+        ctx->ixi0220x.in.send_flag  = '2';
+        memcpy(ctx->ixi0220x.in.rspn_code, "413", LEN_RSPN_CODE);
+        ctx->kftc_reply = 1;
+        return ERR_ERR;
+
     }
 
     SYS_TREF;
 
     return ERR_NONE;
-
 
 }
 
