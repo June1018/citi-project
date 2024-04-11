@@ -685,20 +685,40 @@ static int e000_exparm_read(ixn0020_ctx_t   *ctx)
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int f000_msg_format(ixn0020_ctx_t    *ctx)
+static int f000_exmsg1200_make(ixn0020_ctx_t    *ctx)
 {
     int                 rc  = ERR_NONE;
+    int                 err_code;
     ixi1040x_t          ixi1040x;
     exi4000x_t          exi4000x;
+    exi0230x_t          exi0230x;
     exmsg1200_t         exmsg1200;
+    exmsg1200_ix02_t    *ix02;
 
     SYS_TRSF;
 
     /*------------------------------------------------------------------------ */
-    SYS_DSP(" f000_msg_format: host_msg_make [%s]", EXPARM->host_msg_make);
+    SYS_DBG(" f000_exmsg1200_make: host_tx_code  [%.6s]", ctx->tx_code);
+    SYS_DBG(" f000_exmsg1200_make: host_orgi_msg_make [%s]", ctx->host_orgi_msg_make);
     /*------------------------------------------------------------------------ */
 
-    if (EXPARM->host_msg_make[0] != '1')
+    /*------------------------------------------------------------------------ */
+    /* 취급         타점권 재연장                                                  */
+    /* 취급         관리전문 응답                                                  */
+    /*------------------------------------------------------------------------ */
+    /* 이 거래에  대해서는 HOST를 전송하지 않고 무시한다.                                */
+    /* timer는 당행 전문관리번호를 관리하나 이 거래는 적용할 수 없으므로 이전문에             */
+    /* 대해 응답전문을 수신할 경우 무시한다.                                           */
+    /*------------------------------------------------------------------------ */
+    if ((utoa2in(ctx->host_tx_code, 6) == 357000) ||
+        (utoa2in(ctx->host_tx_code, 6) == 676100))
+        return GOB_NRM;
+
+    /*------------------------------------------------------------------------ */
+    /* 취급 결번 응답 (357100)                                                    */
+    /*------------------------------------------------------------------------ */
+    if ((EXPARM->host_orgi_msg_make[0] != '1') ||
+        (utoa2in(ctx->host_tx_code, 6) == 357000)
         return ERR_NONE;
 
     /*------------------------------------------------------------------------ */
@@ -708,8 +728,10 @@ static int f000_msg_format(ixn0020_ctx_t    *ctx)
     ixi1040x.in.exmsg1200   = &exmsg1200;
     ix_ex1200_init(&ixi1040x);
 
+    memcpy(exmsg1200.tx_code,   ctx->host_tx_code,  LEN_TX_CODE);
+
     /*------------------------------------------------------------------------ */
-    /* 호스트전문으로 FORMAT                                                      */
+    /* 대외전문을 1200byte 전문으로 FORMATING                                      */
     /*------------------------------------------------------------------------ */
     memset(&exi4000x,   0x00,   sizeof(exi4000x_t));
     exi4000x.in.type            = EXI4000X_REQ_MAPP;
@@ -725,39 +747,63 @@ static int f000_msg_format(ixn0020_ctx_t    *ctx)
 
     rc = ex_format(&exi4000x);
     if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_msg_format()"
-                             "FORMAT ERROR: host_tx_code [%s]"
-                             "[해결방안]업무담당자 CALL",
-                             __FILE__, ctx->host_tx_code);
-        goto SYS_CATCH;
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_exmsg1200_make()"
+                             "FORMAT ERROR: tx_code [%s]"
+                             "[해결방안]IX 담당자 CALL",
+                             __FILE__, exi4000x.tx_code);
+
+        ctx->ixi0220x.in.msg_code   = '1';
+        ctx->ixi0220x.in.send_flag  = '2';
+        memcpy(ctx->ixi0220x.in.rspn_code, "413", LEN_RSPN_CODE);
+        ctx->kftc_reply = 1;
+        return ERR_ERR;
+
     }
 
-    if (exi4000x.out.msg_len <= 0){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_msg_format()"
-                             "FORMAT ERROR: host_tx_code [%s]"
-                             "[해결방안]업무담당자 CALL",
-                             __FILE__, ctx->host_tx_code);
-        goto SYS_CATCH;
-    }
-
-    /* 전문변환 데이터 1200 bytes */
-    memcpy(&exmsg1200, exi4000x.out.msg, LEN_EXMSG1200);
-
-    /*------------------------------------------------------------------------ */
-    /* 변환된전문을 COMMBUFF에 set                                                 */
-    /*------------------------------------------------------------------------ */
+    /* EXMSG1200을 commbuff에 저장  */
     rc = sysocbsi(ctx->cb, IDX_EXMSG1200,   &exmsg1200, LEN_EXMSG1200);
-    if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_msg_format()"
-                             "COMMBUFF(EXMSG1200) SET ERROR"
-                             "[해결방안]업무담당자 CALL",
-                             __FILE__);
-        goto SYS_CATCH;
+    if (exi4000x.out.msg_len <= 0){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_exmsg1200_make()"
+                             "FORMAT ERROR: tx_code [%s]"
+                             "[해결방안]시스템 담당자 CALL",
+                             __FILE__,  exi4000x.tx_code);
+
+        ctx->ixi0220x.in.msg_code   = '1';
+        ctx->ixi0220x.in.send_flag  = '2';
+        memcpy(ctx->ixi0220x.in.rspn_code, "413", LEN_RSPN_CODE);
+        ctx->kftc_reply = 1;
+        return ERR_ERR;
     }
 
-    memcpy(EXMSG1200->tx_code, ctx->host_tx_code, LEN_TX_CODE);
-    utodate1(EXMSG1200->tx_date);
-    utotime1(EXMSG1200->tx_time);
+    /*------------------------------------------------------------------------ */
+    SYS_DBG(" f000_exmsg1200_make: EXMSG1200->tx_code    [%.8s]", EXMSG1200->tx_code);
+    SYS_DBG(" f000_exmsg1200_make: EXMSG1200->msg_no    [%.12s]", EXMSG1200->msg_no);
+    SYS_DBG(" f000_exmsg1200_make: EXMSG1200->out_msg_no[%.10s]", EXMSG1200->out_msg_no);
+    /*------------------------------------------------------------------------ */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #ifdef _SIT_DBG
     /* ------------------------------------------------------------------------- */
