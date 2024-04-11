@@ -781,29 +781,105 @@ static int f000_exmsg1200_make(ixn0020_ctx_t    *ctx)
     SYS_DBG(" f000_exmsg1200_make: EXMSG1200->out_msg_no[%.10s]", EXMSG1200->out_msg_no);
     /*------------------------------------------------------------------------ */
 
+    if (memcmp(&EXMSG1200->tx_code[2], "971020", 6) > 0){
+        memcpy(EXMSG1200->tx_date,  "19", 2);
+        memcpy(EXMSG1200->val_date, "19", 2);
+    }
+    else{
+        memcpy(EXMSG1200->tx_date,  "20", 2);
+        memcpy(EXMSG1200->val_date, "20", 2);
+    }
 
 
+    memcpy(EXMSG1200->tx_code,  EXPARM->tx_code,    LEN_EXMSG1200_TX_CODE);
+
+    /* ------------------------------------------------------------------- */
+    /* 수표조회거래인 경우 상세부                                                */
+    /* ------------------------------------------------------------------- */
+    if (memcmp(EXMSG1200->tx_code, "3561000000", LEN_EXMSG1200_TX_CODE) == 0) {
+        ix02 = (exmsg1200_ix02_t *) EXMSG1200->detl_area;
+
+        if (memcmp(ix02->chq_issu_date, "971020", 6) >= 0){
+            memcpy(ix02->chq_issu_date, "19",  2);
+        }
+        else{
+            memcpy(ix02->chq_issu_date, "20",  2);
+        }
+    }
+
+    /* ------------------------------------------------------------------- */
+    /* 응답코드를 대외기관 응답코드를 내부에러코드로 반환                              */
+    /* ------------------------------------------------------------------- */
+    memset(&exi0230x,   0x00, sizeof(exi0230x_t));
+    exi0230x.in.conv_flag[0] = 'K';
+    memcpy(exi0230x.in.appl_code,       IX_CODE,        LEN_APPL_CODE);
+    memcpy(exi0230x.in.sub_appl_code,   SUB_IX_CODE,    LEN_EXI0230X_SUB_APPL_CODE);
+    /* bank code length  */
+    /* memcpy(exi0230x.in.rspn_code)*/
+    memcpy(exi0230x.in.rspn_code,   &ctx->ext_recv_data[22],    LEN_EXI0230X_RSPN_CODE);
+
+    rc = ex_err_conv(&exi0230x);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_exmsg1200_make()"
+                             "FORMAT ERROR: tx_code [%s] rspn_code[%s]"
+                             "[해결방안]IX 담당자 CALL",
+                             __FILE__, exi4000x.tx_code, exi0230x.in.rspn_code);
+
+        ctx->ext_recv_data[IX_IDX_MSG_TYPE] = '9';
+        ctx->ixi0220x.in.msg_code   = '1';
+        ctx->ixi0220x.in.send_flag  = '2';
+        memcpy(ctx->ixi0220x.in.rspn_code, "306", LEN_RSPN_CODE);
+        ctx->kftc_reply = 1;
+        return ERR_ERR;
+    }
+
+    /* error code */
+    memcpy(EXMSG1200->err_code, exi0230x.our.err_code, LEN_EXI0230X_ERR_CODE);
+    /* error msg */
+    memcpy(EXMSG1200->err_msg,  exi0230x.our.err_name, LEN_EXI0230X_ERR_MSG );
+
+    err_code = utoa2in(exi0230x.our.err_code, LEN_EXI0230X_ERR_CODE);
+    SYS_HSTERR(SYS_NN, err_code, "");
+
+    if (strlen(exi0230x.our.rspn_code) > 0)
+        
+        /* bankcode lenght */
+        memcpy(&ctx->ext_recv_data[22], exi0230x.out.rspn_code, LEN_EXI0230X_RSPN_CODE);
+    
+    memcpy(ctx->err_msg,    exi0230x.out.err_name, LEN_EXI0230X_ERR_MSG);
 
 
+    /* -------------------------------------------------------------------------- */
+    /* IXJRN 읽어 ctx->kti_flag set 한다.                                           */
+    /* -------------------------------------------------------------------------- */
+    char                tmp_kti_flag [LEN_KTI_FLAG              + 1];
+    char                tmp_tx_date  [LEN_EXMSG1200_TX_DATE     + 1];
+    char                tmp_ei_msg_no[LEN_EXMSG1200_EI_MSG_NO   + 1];
+    memset(tmp_kti_flag,    0x00, sizeof(tmp_kti_flag   ));
+    memset(tmp_tx_date,     0x00, sizeof(tmp_tx_date    ));
+    memset(tmp_ei_msg_no,   0x00, sizeof(tmp_ei_msg_no  ));
+
+    memcpy(tmp_tx_date,     EXMSG1200->tx_date   , LEN_EXMSG1200_TX_DATE);
+    memcpy(tmp_ei_msg_no,   EXMSG1200->old_msg_no, LEN_EXMSG1200_EI_MSG_NO  );
+
+    EXEC SQL SELECT KTI_FLAG
+               INTO :tmp_kti_flag
+               FROM IXJRN
+              WHERE TX_DATE    = :tmp_tx_date
+                AND EI_MSG_NO  = :tmp_ei_msg_no
+                AND SEND_FLAG  != '5';
+
+    if (SYS_DB_CHK_FETCHFAIL){
+        db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_exmsg1200_make() SELECT(IXJRN) [%d]"
+                             "[해결방안] ORACLE 담당자 CALL MSG[%s], ei_msg_no[%s]",
+                             __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR, tmp_ei_msg_no);
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "IXJRN SELECT ERROR");
+    }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    memcpy(ctx->kti_flag,   tmp_kti_flag, LEN_KTI_FLAG);
+    /* ------------------------------------------------------------------------- */
 
 #ifdef _SIT_DBG
     /* ------------------------------------------------------------------------- */
@@ -815,14 +891,6 @@ static int f000_exmsg1200_make(ixn0020_ctx_t    *ctx)
     SYS_TREF;
     return ERR_NONE;
 
-SYS_CATCH:
-
-    ctx->ixi0220x.in.msg_code = '1';
-    ctx->ixi0220x.in.msg_code = '4';
-    memcpy(ctx->ixi0220x.in.rspn_code, "413", LEN_RSPN_CODE);
-
-    SYS_TREF;
-    return ERR_ERR;
 
 }
 
