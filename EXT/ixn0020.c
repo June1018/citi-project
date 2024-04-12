@@ -1406,12 +1406,393 @@ static int m000_rspn_code_check(ixn0020_ctx_t       *ctx)
     SYS_DBG("EXPARM->rspn_cmp_code[%c]", EXPARM->rspn_cmp_code[0] );
     /* ------------------------------------------------------------ */    
 
+    /* ------------------------------------------------------------ */
+    /* IXJRN에서 SELECT한 전문의 응답코드와 수신한 전문의                    */
+    /* 응답코드를 비교하여 확인 한다.                                      */
+    /* ------------------------------------------------------------ */
+    switch(EXPARM->rspn_cmp_code[0]){
+    case '1':
+        ix0200a = (ixmsg0200a_t *) ctx->ext_recv_data;
+        SYS_TRY(m100_proc_rspn_chk(ctx));
+        break;
+    /* ------------------------------------------------------------ */
+    /* 수표조회(2), 처리결과조회(3), 입금취소거래(4)인 경우                   */
+    /* ------------------------------------------------------------ */
+    case '2':
+    case '3':
+    case '4':
+        /* -------------------------------------------------------- */
+        /* 만약 IXJRN에서의 응답코드가 불능(TIME OVER)인 경우 무시           */
+        /* -------------------------------------------------------- */
+        if ((memcpmp(ctx->ixjrn.rspn_code, "000",  LEN_RSPN_CODE) != 0) &&
+            (memcpmp(ctx->ixjrn.rspn_code, "   ",  LEN_RSPN_CODE) != 0)){
+            return ERR_ERR;
+        }
+        break;
+    }
+    /* ------------------------------------------------------------ */
+    /* 입금불능전문 (송수신 flag == 5)을 수신한 경우 불능 저널을              */
+    /* 생성한다.                                                      */
+    /* (기입금 '309'거래는 불능 저널을 생성하지 않는다. )                    */
+    /* ------------------------------------------------------------ */
+    if (ctx->tx_num == 1){
+        if (ix0200a->send_flag[0] == '5') {
+            if (memcmp(ix0200a->rspn_code, "309",  LEN_RSPN_CODE) ==0 ){
+                EXPARM->host_send_jrn_make[0] = '0';
+                EXPARM->host_send_tot_flag[0] = '0';
+            }
+            else if (memcmp(ix0200a->rspn_code, "000", LEN_RSPN_CODE) != 0){
+                EXPARM->host_send_jrn_make[0] = '2';
+            }
+        }
+    }
+
+    /* ------------------------------------------------------------ */
+    /* 응답코드가 정상이 아닌지 확인한다.                                   */
+    /* ------------------------------------------------------------ */
+    if (ctx->tx_num == 4){
+        ix21 = (exmsg1200_ix21_t *) EXMSG1200->detl_area;
+
+        if ((ctx->orig_canc_type[0] == '0') &&
+            (memcmp(ix21->rspn_code, "607",  LEN_RSPN_CODE) == 0)) {
+            /* -------------------------------------------------------- */
+            /* 원저널이 취소되지 않았고 취소거래의 응답코드가                      */
+            /* 기취소이면 정상취소거래로 처리한다.                              */
+            /* -------------------------------------------------------- */
+            ix0400b = (ixmsg0400_t *) ctx->ext_recv_data;
+            memset(ix0400b->rspn_code,  '0',    LEN_RSPN_CODE);
+            memset(ix21->rspn_code,     '0',    LEN_RSPN_CODE);
+            memset(EXMSG1200->err_code, '0',    LEN_EXMSG1200_ERR_CODE);
+            SYS_HSTERR(SYS_NN, 0, "");
+        }else{
+            if (memcmp(EXMSG1200->err_code, "0000000", LEN_EXMSG1200_ERR_CODE) != 0 ){
+                /* -------------------------------------------------------- */
+                /* 상기경우외에 취소거래의 응답코드가 정상이 아니면                    */
+                /* 취소시 원저널 UPDATE FLAG를 '0'으로 SET하고                   */
+                /* 집계반영 FLAG를 '0'으로 SET한다.                             */
+                /* -------------------------------------------------------- */
+                EXPARM->canc_org_upd[0]         = '0';
+                EXPARM->host_send_tot_flag[0]   = '0';
+            }
+        }
+    }
+
+    SYS_TREF;
+
+SYS_CATCH:
     
+    SYS_TREF;
+
+    return ERR_ERR;
+
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int m100_proc_rspn_chk(ixn0020_ctx_t     *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    char                func_name[LEN_EXPARM_SUB_PGM_NAME + 1];
+    ixmsg0200a          *ix0200a;
+
+    SYS_TRSF;
+
+    ix0200a = (ixmsg0200a_t *) ctx->ext_recv_data;
+
+    /* ------------------------------------------------------------ */
+    SYS_DBG("EXT   : rspn_code[%.3s]", ix0200a->rspn_code  );
+    SYS_DBG("IXJRN : rspn_code[%.3s]", ctx->ixjrn.rspn_code);
+    /* ------------------------------------------------------------ */
+
+    /* ------------------------------------------------------------ */
+    /* 만약 수신한 전문이 정상응답이면                                     */
+    /* ------------------------------------------------------------ */
+    if (memcmp(ix0200a->rspn_code, "000", LEN_RSPN_CODE) == 0) {
+        /* --------------------------------------------------- */
+        /* 만약 IXJRN에서의 응답코드가 정상이면 무시                   */
+        /* --------------------------------------------------- */
+        if (memcmp(ctx->ixjrn.rspn_code, "000", LEN_RSPN_CODE) == 0){
+            return ERR_ERR;
+        }
+        /* --------------------------------------------------- */
+        /* 만약 IXJRN에서의 응답코드가 이중거래이거나                   */
+        /* 아직응답전문을 수신하지 않고                               */
+        /* 정상응답전문을 수신하면 정상처리한다.                        */
+        /* --------------------------------------------------- */
+        else if (memcmp(ctx->ixjrn.rspn_code, "309", LEN_RSPN_CODE) == 0){
+            return ERR_NONE;
+        }
+        /* --------------------------------------------------- */
+        /* 이전에 이미 불능응답으로 전문을 수신하고                     */
+        /* 다시 정상응답으로 전문을 수신한 경우 무시                    */
+        /* --------------------------------------------------- */
+        else if (memcmp(ctx->ixjrn.rspn_code, "  ", LEN_RSPN_CODE) != 0){
+            return ERR_ERR;
+        }
+        /* --------------------------------------------------- */
+        /* 아직 응답 전문을 수신하지 않고                             */
+        /* 정상응답을 수신하면 정상처리한다.                           */
+        /* --------------------------------------------------- */
+        else {
+            return ERR_NONE;
+        }
+    }
+    /* ------------------------------------------------------------ */
+    /* 이중거래 에러로 전문을 수신한 경우                                   */
+    /* ------------------------------------------------------------ */
+    else if (memcmp(ix0200a->rspn_code, "309", LEN_RSPN_CODE) == 0){
+        /* --------------------------------------------------- */
+        /* 만약 IXJRN에서의 응답코드가 정상이면 무시                   */
+        /* --------------------------------------------------- */
+        if (memcmp(ctx->ixjrn.rspn_code, "000", LEN_RSPN_CODE) == 0){
+            return ERR_ERR;
+        }
+        /* --------------------------------------------------- */
+        /* 만약 IXJRN에서의 응답코드가 불능이면 무시                   */
+        /* --------------------------------------------------- */
+        else if (memcmp(ctx->ixjrn.rspn_code, "  ", LEN_RSPN_CODE) != 0){
+            return ERR_ERR;
+        }
+        /* --------------------------------------------------- */
+        /* 만약 IXJRN는 미완료로 되어있는 경우                        */
+        /* IXJRN은 UPDATE하고 IXTOT는 반영하지 않는다.               */
+        /* --------------------------------------------------- */
+        EXPARM->host_send_jrn_upd[0]  = '2';
+        EXPARM->host_send_tot_flag[0] = '0';
+    }
+    /* ------------------------------------------------------------ */
+    /* 입금불능 전문을 수신한 경우                                        */
+    /* ------------------------------------------------------------ */
+    else {
+        /* --------------------------------------------------- */
+        /* 순채무한도 에러로 전문을 수신한 경우                        */
+        /* 에러처리 서비스 호출                                    */
+        /* --------------------------------------------------- */
+        if (memcmp(ix0200a->rspn_code, "999", LEN_RSPN_CODE) == 0){
+            memset(func_name,   0x00, sizeof(func_name));
+            if (EXPARM->sub_pgm_flag[0] == '1'){
+                memcpy(func_name,   EXPARM->sub_pgm_name, LEN_EXPARM_SUB_PGM_NAME);
+            }
+            else{
+                strcpy(func_name, "EXO6800");
+            }
+            utortrim(func_name);
+
+            /* 관리전문 수동처리 서비스 호출    */
+            x000_msg_svc_call(ctx, func_name);
+    
+        }
+
+        /* --------------------------------------------------- */
+        /* 만약 IXJRN에서 응답코드가 미완료이면                       */
+        /* 집계반영 FLAG를 '0'으로 RESET                          */
+        /* --------------------------------------------------- */
+        if (memcmp(ctx->ixjrn.rspn_code, "   ", LEN_RSPN_CODE) == 0){
+            EXPARM->host_send_tot_flag[0] = '0';
+        }
+        /* --------------------------------------------------- */
+        /* 이미 이중거래전문을 수신한 상태이면                         */
+        /* IXJRN에 반영하고 IXTOT에는 반영하지 않는다.                */
+        /* --------------------------------------------------- */
+        else if (memcmp(ctx->ixjrn.rspn_code, "309", LEN_RSPN_CODE) == 0){
+            EXPARM->host_send_jrn_upd[0]    = '2';
+            EXPARM->host_send_tot_flag[0]   = '0';
+        }
+        /* --------------------------------------------------- */
+        /* 이미 입금불능전문을 수신한 상태이면 무시                     */
+        /* --------------------------------------------------- */
+        else if (memcmp(ctx->ixjrn.rspn_code, "000", LEN_RSPN_CODE) != 0){
+            return ERR_ERR;
+        }
+        /* --------------------------------------------------- */
+        /* 이미 입금정상전문을 수신했으면 정상                         */
+        /* 처리한다.                                             */
+        /* --------------------------------------------------- */
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+/* IXJRN을 읽어 원거래의 중요항목을 조립한다.                                                                           */
+/* ------------------------------------------------------------------------------------------------------------ */
+static int n000_ix_host_orig_msg_make(ixn0020_ctx_t     *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    int                 len;
+    ixi1040x_t          ixi1040x;
+    ixi0110x_t          ixi1100x;
+    exmsg1200_ix21_t    *ix21a;
+    exmsg1200_ix21_t    *ix21b;
+    exmsg1200_ix25_t    *ix25a;
+    exmsg1200_ix25_t    *ix25b;
+
+
+    SYS_TRSF;
+
+    /* ------------------------------------------------------------ */
+    SYS_DBG("host_orig_msg_make (n000_ix_host_orig_msg_make) -001 [%s]", EXPARM->host_orgi_msg_make  );
+    
+    /* ------------------------------------------------------------ */
+    /* 원전문을 조립한다.                                               */
+    /* ------------------------------------------------------------ */
+    if (EXPARM->host_orgi_msg_make[0] != '1')
+        return ERR_NONE;
+
+    /* 1200전문 초기화    */
+    memset(&ixi1040x,   0x00,   sizeof(ixi1040x_t));
+    ixi1040x.in.exmsg1200 = &ctx->exmsg1200;
+    ix_ex1200_init(&ixi1040x);
+
+    /* 저널 데이터를 이용해 1200전문을 조립힌다. */
+    memset(&ixi1100x,   0x00,   sizeof(ixi1100x_t));
+    ixi1100x.in.ixjrn       = &ctx->ixjrn;
+    ixi1100x.in.exmsg1200   = &ctx->exmsg1200;
+
+    /* ------------------------------------------------------------ */
+    /* IXJRN DATA를 1200 바이트 전문으로 변환                            */
+    /* ------------------------------------------------------------ */
+    ix_jrn_ex1200_make(&ixi1100x);
+
+    SYS_DBG("&ctx->ixjrn.kti_flag[0]=[%s]", &ctx->ixjrn.kti_flag);
+
+    /* KTI 전송시 passwd  */
+    if (ctx->kti_flag[0] == '1'){
+        if (memcmp(EXMSG1200->pswd_1, "@@@@@@@@@@@@@@@@", LEN_EXMSG1200_PSWD_1) == 0){
+            memset(EXMSG1200->pswd_1, 0x20, LEN_EXMSG1200_PSWD_1);
+        }
+    }
+
+    /* 거래공통   1200전문 조립 */
+    memcpy(ctx->exmsg1200.tx_id, EXMSG1200->tx_id,   LEN_EXMSG1200_TX_ID);
+    ctx->exmsg1200.tx_code[5] =  EXMSG1200->tx_code[5];
+
+    memcpy(ctx->exmsg1200.err_code,  EXMSG1200->err_code, LEN_EXMSG1200_ERR_CODE);
+    if (sys_err_code() > 0) {
+        sprintf(ctx->exmsg1200.err_code, "%07d", sys_err_code());
+    }
+
+    len = strlen(sys_err_msg());
+    if (len > 0){
+        len = (len > LEN_EXMSG1200_ERR_MSG) ? LEN_EXMSG1200_ERR_MSG : len; 
+        memcpy(ctx->exmsg1200.err_msg, sys_err_msg(), len);
+    }
+
+    memcpy(ctx->exmsg1200.cr_brn_no,    EXMSG1200->cr_brn_no,   LEN_EXMSG1200_CR_BRN_NO  );
+    memcpy(ctx->exmsg1200.msg_no   ,    EXMSG1200->msg_no   ,   LEN_EXMSG1200_MSG_NO     );
+    memcpy(ctx->exmsg1200.teir_msg_no,  EXMSG1200->teir_msg_no, LEN_EXMSG1200_TEIR_MSG_NO);
+
+    /* 거래코드별 1200 전문 조립     */
+    switch(ctx->tx_num){
+    case 1:
+    case 3:
+    case 4:
+    case 6:
+    case 8:
+        ix21a = (exmsg1200_ix21_t *) EXMSG1200->detl_area;
+        ix21b = (exmsg1200_ix21_t *) ctx->exmsg1200.detl_area;
+
+        SYS_DBG("ix21a->chq_brn_no   =[%.*s]", LEN_EXMSG1200_IX21_CHQ_BRN_NO  , ix21a->chq_brn_no);
+        SYS_DBG("ix21a->chq_cash_amti=[%.*s]", LEN_EXMSG1200_IX21_CHQ_CASH_AMT, ix21a->chq_cash_amt);
+
+        memcpy(ix21b->rspn_code,        ix21a->rspn_code,       LEN_EXMSG1200_IX21_RSPN_CODE);
+        memcpy(ix21b->kftc_time,        ix21a->kftc_time,       LEN_EXMSG1200_IX21_KFTC_TIME);
+        memcpy(ix21b->teir_time,        ix21a->teir_time,       LEN_EXMSG1200_IX21_TEIR_TIEM);
+        memcpy(ix21b->chq_no   ,        ix21a->chq_no   ,       LEN_EXMSG1200_IX21_CHQ_NO   );
+        memcpy(ix21b->chq_brn_no,       ix21a->chq_brn_no,      LEN_EXMSG1200_IX21_CHQ_BRN_NO);
+        memcpy(ix21b->orig_msg_no,      ix21a->orig_msg_no,     LEN_EXMSG1200_IX21_ORIG_MSG_NO);
+
+        SYS_DBG("ix21a->chq_brn_no   =[%.*s]", LEN_EXMSG1200_IX21_CHQ_BRN_NO  , ix21a->chq_brn_no);
+        SYS_DBG("ix21a->chq_cash_amti=[%.*s]", LEN_EXMSG1200_IX21_CHQ_CASH_AMT, ix21a->chq_cash_amt);
+
+        memcpy(ctx->exmsg1200.rcv_cust_name,    EXMSG1200->rcv_cust_name, LEN_EXMSG1200_RCV_CUST_NAME);
+
+        if (ctx->tx_num == 1){
+            ctx->exmsg1200.rspn_flag[0] = '1';
+            /* --------------------------------------------------------- */
+            /* 정상 입금 응답인   경우                                        */
+            /* --------------------------------------------------------- */
+            if (memcmp(ix21a->rspn_code, "000", LEN_EXMSG1200_IX21_RSPN_CODE) == 0){
+                ctx->exmsg1200.tx_code[5] = '1';
+            }
+            /* --------------------------------------------------------- */
+            /* 불능 입금 응답인   경우                                        */
+            /* --------------------------------------------------------- */
+            else {
+                ctx->exmsg1200.tx_code[5]   = '2';
+                ctx->exmsg1200.canc_type[0] = '1';
+            }
+        }
+        break;
+
+    case 2:
+    /* ----------------------------------------------------------------- */
+    /* 어음 미결제 통보인 경우                                                */
+    /* ----------------------------------------------------------------- */
+    case 5:
+    /* ----------------------------------------------------------------- */
+    /* 기업구매자금 어음 통보인 추가                                            */
+    /* ----------------------------------------------------------------- */
+    case 9:
+        ctx->exmsg1200.rspn_flag[0] = '1';
+        memcpy(ctx->exmsg1200.detl_area,    EXMSG1200->detl_area,   LEN_EXMSG1200_DETL_AREA);
+
+        /* 기업구매자금 어음 거래약정 조회 추가  */
+        memcpy(ctx->exmsg1200.reqs_cust_name,   EXMSG1200_reqs_cust_name,   LEN_EXMSG1200_REQS_CUST_NAME);
+        break;
+
+    /* ----------------------------------------------------------------- */
+    /* 부도  어음 통보인 경우                                                 */
+    /* ----------------------------------------------------------------- */
+    case 7:
+        ctx->exmsg1200.rspn_flag[0] = '1';
+        ix25a   = (exmsg1200_ix25_t *) EXMSG1200->detl_area;
+        ix25b   = (exmsg1200_ix25_t *) ctx->exmsg1200.detl_area;
+
+        memcpy(ctx->exmsg1200.comm_filler,  EXMSG1200->comm_filler, LEN_EXMSG1200_COMM_FILLER);
+        memcpy(ctx->exmsg1200.cust_id    ,  EXMSG1200->cust_id    , LEN_EXMSG1200_CUST_ID    );
+        memcpy(ctx->exmsg1200.detl_area  ,  EXMSG1200->detl_area  , LEN_EXMSG1200_DETL_AREA  );
+        break;
+
+    default:
+        break; 
+    }
+
+
+
+    /* 타행환 취소 및 수취조회 전문 변경 */
+    int tmp_rc = 0;
+    tmp_rc = utostcmp(ctx->host_tx_code,    "3181000000", "3181000300", "3181000500", "3181000900", "3181001000", "3181100000", "");
+    if (tmp_rc > 0) {
+        memcpy(&ctx->exmsg1200.detl_area[290],  &EXMSG1200->detl_area[290], 9);
+        SYS_DBG("&ctx->exmsg1200.detl_area[290]==>[%.9s] &EXMSG1200->detl_area[290]==>[%.9s]", &ctx->exmsg1200.detl_area[290], &EXMSG1200->detl_area[290]);
+    }
+    tmp_rc = 0;
+    tmp_rc = utostcmp(ctx->host_tx_code, "3087000000", "3087000300", "3577100000");
+    if (tmp_rc > 0) {
+        memcpy(&ctx->exmsg1200.detl_area[290],  &EXMSG1200->detl_area[290], 7);
+        SYS_DBG("&ctx->exmsg1200.detl_area[290]==>[%.7s] &EXMSG1200->detl_area[290]==>[%.7s]", &ctx->exmsg1200.detl_area[290], &EXMSG1200->detl_area[290]);
+
+    }
+
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
 }
 /* ------------------------------------------------------------------------------------------------------------ */
-/* ------------------------------------------------------------------------------------------------------------ */
-/* ------------------------------------------------------------------------------------------------------------ */
-/* ------------------------------------------------------------------------------------------------------------ */
+static int o000_ix_canc_orig_update(ixn0020_ctx_t       *ctx)
+{
+    int                 rc = ERR_NONE;
+    char                kftc_msg_no[LEN_EXMSG1200_IX]
+
+}
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
