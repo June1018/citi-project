@@ -1087,6 +1087,240 @@ static int  g000_tx_code_check(ixn0020_ctx_t    *ctx)
     return ERR_NONE;
 
 }
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int h000_ix_skn_check(ixn0020_ctx_t  *ctx)
+{
+
+    int                 rc  = ERR_NONE;
+    ixi0120f_t          ixi0120f;
+
+    SYS_TRSF;
+
+    /* ------------------------------------------------------------ */
+    SYS_DBG("h000_ix_skn_check kftc_skn_chk[%s]", EXPARM->kftc_skn_chk);
+    /* ------------------------------------------------------------ */
+
+    if (EXPARM->kftc_skn_chk[0] != '1')
+        return ERR_NONE;
+
+    /* ------------------------------------------------------------ */
+    /* 결번 검증 처리                                                  */
+    /* ------------------------------------------------------------ */
+    memset(&ixi0120f,   0x00, sizeof(ixi0120f_t));
+
+    /* Decoupling ***************************************************/
+    ixi0120f.in.in_flag         = 1;        /* 0.취급업무 , 1.개설업무  */
+    ixi0120f.in.in_max_flag     = 0;        /* 0.중복검증 , 1.MAX채번  */
+    memcpy(ixi0120f.in.in_kti_flag, ctx->kti_flag,  LEN_IXI0120F_KTI_FLAG);
+
+    SYS_TRY(g000_ix_skn_check(&ixi0120f));
+
+    sys_tx_commit(TX_CHAINED);
+    EXPARM->kftc_dup_chk[0] = ixi0120f.out.dup_chk_flag[0];
+
+    SYS_TREF;
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    SYS_TREF;
+    return ERR_ERR;
+
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int j000_ix_dup_check(ixn0020_ctx_t  *ctx)
+{
+
+    int                 rc  = ERR_NONE;
+
+    ixi0110x_t          ixi0110x;
+
+
+    exmsg1200_ix02_t    *ix02_area;
+    exmsg1200_ix21_t    *ix21_area;
+    exmsg1200_ix24_t    *ix24_area;
+    exmsg1200_ix25_t    *ix25_area;
+
+
+    SYS_TRSF;
+
+    /* ------------------------------------------------------------ */
+    SYS_DBG("j000_ix_dup_check kftc_dup_chk[%s]", EXPARM->kftc_dup_chk);
+    /* ------------------------------------------------------------ */
+
+    if (EXPARM->kftc_dup_chk[0] != '1')
+        return ERR_NONE;
+
+    /* ------------------------------------------------------------ */
+    /* 중복거래 검증                                                   */
+    /* ------------------------------------------------------------ */
+    memset(&ixi0110x,   0x00,   sizeof(ixi0110x_t));
+    ixi0110x.in.in_flag = 1;
+    memcpy(ixi0110x.in.tx_date, EXMSG1200->tx_date, LEN_IXI0110X_TX_DATE);
+    memcpy(ixi0110x.in.msg_no , EXMSG1200->msg_no , LEN_IXI0110X_MSG_NO );
+    /* bank_code length  */
+    memcpy(ixi0110x.in.our_msg_no,  EXMSG1200->our_msg_no, LEN_IXI0110X_OUT_MSG_NO);
+    /* EXMSG1200->old_msg_no에 EI_MSG_NO가 조립되어 있다.   */
+    memcpy(ixi0110x.in.ei_msg_no,   EXMSG1200->old_msg_no, LEN_IXI0110X_OUT_MSG_NO);
+    memcpy(ixi0110x.in.kti_flag,    ctx->kti_flag        , LEN_IXI0110X_KTI_FLAG  );
+
+    /* ------------------------------------------------------------ */
+    SYS_DBG("j000_ix_dup_check ei_msg_no[%s]", ixi0110x.in.msg_no );
+    /* ------------------------------------------------------------ */
+
+    rc = ix_dup_chk(&ixi0110x);
+
+    SYS_DBG("ixi0110x.out.rspn_code[%.3s]", ixi0110x.our.rspn_code);
+
+    switch(rc){
+    /* ------------------------------------------------------------ */
+    /* 중복거래인 경우                                                 */
+    /* 중계센터로 "이중거래임 "으로 응답코드를 set 전송                      */
+    /* ------------------------------------------------------------ */
+    case ERR_NONE:
+        return ERR_ERR;
+
+
+
+
+
+    /* ------------------------------------------------------------ */
+    /* 중복거래가 아닌 경우                                              */
+    /* ------------------------------------------------------------ */
+    case SYS_DB_NOTFOUND:
+        break;
+
+    /* ------------------------------------------------------------ */
+    /* 기타 DB_ERROR인경우                                             */
+    /* 중계센터로 "은행센터의 SYSTEM장애로 "로 SET 하여 전송                 */
+    /* ------------------------------------------------------------ */
+    case ERR_ERR:
+         ctx->ixi0220x.in.msg_code      = '1';
+         ctx->ixi0220x.in.send_flag     = '2';
+         memcpy(ctx->ixi0220x.in.rspn_code, "413",  LEN_RSPN_CODE);
+         ctx->kftc_reply    = 1;
+         return ERR_ERR;
+
+
+    default:
+        break;
+    }
+    
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
+/* ------------------------------------------------------------------------------------------------------------ */
+/* 취소거래시 원거래 저널 검증을 한다.                                                                                  */
+/* 원 저널 정보를 ctx->ixjrn에 보관을 하는데 .. EXPARM->canc_org_chk[0] = '1' 이 아니면                                  */
+/* n000_ix_host_orig_make에서 exmsg1200전문을 원복하지 못한다.                                                        */
+/* ------------------------------------------------------------------------------------------------------------ */
+static int k000_canc_orig_chk(ixn0020_ctx_t     *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    ixi1020x_t          ixi1020x;
+    exmsg1200_ix21_t    *ix21;
+
+
+    SYS_TRSF;
+
+    /* ------------------------------------------------------------ */
+    SYS_DBG("k000_canc_orig_chk : canc_orig_chk[%s]", EXPARM->canc_orig_chk );
+    /* ------------------------------------------------------------ */
+
+    if (EXPARM->canc_orig_chk[0] != '1')
+        return ERR_NONE;
+
+    ix21 = (exmsg1200_ix21_t *) EXMSG1200->detl_area;
+
+    /* ------------------------------------------------------------ */
+    /* 취소거래시 원저널 검증                                            */
+    /* ------------------------------------------------------------ */
+    memset(&ixi1020x,   0x00, sizeof(ixi1020x_t));
+    ixi1020x.in.in_flag     = 0;
+    ixi1020x.in.exmsg1200   = EXMSG1200;
+    memcpy(ixi1020x.ion.tx_date,    EXMSG1200->tx_date,     LEN_IXI1020X_TX_DATE);
+    /* 수표요건 수정 */
+
+
+    memcpy(ixi1020x.in.prc_flag         , "IXN002001"           , 9);
+    memcpy(ixi1020x.in.msg_no           ,  ix21->orig_ei_msg_no , 10);
+    memcpy(ixi1020x.in.orig_ei_msg_no   ,  ix21->orig_ei_msg_no , 10);
+    memcpy(ixi1020x.in.kti_flag         , ctx->kti_flag         , LEN_KTI_FLAG);  /* 시스템 구분 : 0:GCG 1:ICG   */
+
+
+    SYS_DBG("k000_canc_orig_chk 001");
+    SYS_DBG("k000_canc_orig_chk :ixi1020x.in.prc_flag       [%.8s]" , &ixi1020x.in.prc_flag );
+    SYS_DBG("k000_canc_orig_chk :ix21->orig_ei_msg_no       [%.10s]", &ix21->orig_ei_msg_no);
+    SYS_DBG("k000_canc_orig_chk :ixi1020x.in.msg_no         [%.10s]", &ixi1020x.in.msg_no );
+    SYS_DBG("k000_canc_orig_chk :ixi1020x.in.orig_ei_msg_no [%.10s]", &ixi1020x.in.orig_ei_msg_no );
+
+    /**
+    * 타행 자기앞 거래시 거래고유번호 12자리 read& hold
+    *
+    *
+    *
+    *
+    */
+
+
+    
+    
+    
+    SYS_TRY(ix_jrn_hold(&ixi1020x));
+
+    /* ------------------------------------------------------------ */
+    /* 취소거래시 IXJRN이라는 structure를 "원저널 검증 "과                  */
+    /* "송신전문과 수신전문 비교"에서 두번 사용하므로 원저널의                   */
+    /*  취소여부를 뒤에서 알수가 없으므로 원저널 (입금거래 )의                  */
+    /*  취소상태를 orig_canc_type이라는 변수에 보관하였다가 뒤에서             */
+    /* 원저널이 취소가 안되었으나 수신한 취소거래의 응답코드가                   */
+    /* 기취소로 왔을 경우 정상처리하기 위함                                 */
+    /* ------------------------------------------------------------ */
+    ctx->orig_canc_type[0] = ixi1020x.out.ixjrn.canc_type[0];
+    memcpy(&ctx->ixjrn, &ixi1020x.out.ixjrn,    sizeof(ixjrn_t));
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    SYS_TREF;
+
+    return ERR_ERR;
+    
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+/* 취급시 전송된 전문과 취급응대시 수신한 전문의 일치 여부를 검증한다.                                                         */
+/* ------------------------------------------------------------------------------------------------------------ */
+static int l000_proc_rspn_chk(ixn0020_ctx_t     *ctx)
+{
+
+    int                 rc  = ERR_NONE;
+    char                buff[LEN_TCP_HEAD + 1];
+    ixi0180x_t          ixi0180x;
+
+
+    exmsg1200_ix02_t    *ix02_area;
+    exmsg1200_ix21_t    *ix21_area;
+    exmsg1200_ix24_t    *ix24_area;
+    exmsg1200_ix25_t    *ix25_area;
+
+    SYS_TRSF;
+
+    /* ------------------------------------------------------------ */
+    SYS_DBG("l000_proc_rspn_chk kftc_orig_flag[%s]", EXPARM->kftc_orig_flag );
+    /* ------------------------------------------------------------ */
+
+}
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
