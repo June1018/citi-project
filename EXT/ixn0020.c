@@ -1367,13 +1367,43 @@ static int l000_proc_rspn_chk(ixn0020_ctx_t     *ctx)
         memset(buff,    0x20, sizeof(buff));
         memcpy(buff, ixi0180x.out.tcp_head, strlen(ixi0180x.out.tcp_head));
         rc = sysocbsi(ctx->cb, IDX_TCPHEAD, buff, LEN_TCP_HEAD);
+        if (rc == ERR_ERR){
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s l000_proc_rspn_chk()"
+                                 " COMMBUFF(TCPHEAD) SET ERROR "
+                                 "[해결방안] 업무 담당자 CALL ",
+                                __FILE__ );
+
+            return ERR_ERR;
+
+        }
     }
 
+    SYS_TREF;
 
+    return ERR_NONE;
 
+SYS_CATCH:
+
+    SYS_TREF;
+
+    return ERR_ERR;
 
 }
+
 /* ------------------------------------------------------------------------------------------------------------ */
+static int m000_rspn_code_check(ixn0020_ctx_t       *ctx)
+{
+
+    int                 rc  = ERR_NONE;
+    ixmsg0200a_t        *ixmsg0200a;
+    ixmsg0400_t         *ixmsg0400;
+    exmsg1200_ix21_t    *ix21;
+
+
+    SYS_TRSF;
+
+    
+}
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
