@@ -924,12 +924,167 @@ static int  g000_tx_code_check(ixn0020_ctx_t    *ctx)
     case 308202:
          ctx->tx_num = 1;
          break;
+
     /* ------------------------------------------------------------------------- */
     /* 취급수표조회인 경우                                                            */
     /* ------------------------------------------------------------------------- */
     case 356100:
          ctx->tx_num = 2;
+
+         ix0200b = (ixmsg0200b_t *)ctx->ext_recv_data;
+         ix02    = (exmsg1200_ix02_t *) EXMSG1200->detl_area;
+
+        if ((memcmp(EXMSG1200->err_code, "0000000", 7) == 0) &&
+             (memcmp(ix02->chq_sta_code1, "   "    , 3) != 0)){
+            memset(ix02->chq_sta_code1, '0', 3);
+        }
+        
+        /* --------------------------------------------------- */
+        /* 수표상태코드가 스페이스가 아니면 에러 변환 함                 */
+        /* --------------------------------------------------- */
+        if ((memcmp(EXMSG1200->err_code, "0000000", 7) == 0) &&
+            (memcmp(ix02->chq_sta_code1, "000"    , 3) !=)) {
+        
+            /* --------------------------------------------------- */
+            /* 응답코드를 대외기관 응답코드를 내부 에러코드로 변환             */
+            /* --------------------------------------------------- */
+            memset(&exi0230x,   0x00,   sizeof(exi0230x_t));
+            exi0230x.in.conv_flag[0] = 'K';
+            memcpy(exi0230x.in.appl_code,       IX_CODE,            LEN_APPL_CODE);
+            memcpy(exi0230x.in.sub_appl_code,  SUB_IX_CODE,         LEN_EXI0230X_SUB_APPL_CODE);
+            memcpy(exi0230x.in.rspn_code    ,  ix02->chq_sta_code1, LEN_EXI0230X_RSPN_CODE);
+
+            rc = ex_err_conv(&exi0230x);
+            if (rc == ERR_ERR){
+                ex_syslog(LOG_ERROR, "[APPL_DM] %s g000_tx_code_check()"
+                                     "reason code conv error : chq_sta_code1[%.3s]"
+                                    "[해결방안]IX 담당자 CALL",
+                                    __FILE__, ix02->chq_sta_code1);
+
+                ctx->ext_recv_data[IX_IDX_MSG_TYPE] = '9';
+                ctx->ixi0220x.in.msg_code   = '1';
+                ctx->ixi0220x.in.send_flag  = '2';
+                memcpy(ctx->ixi0220x.in.rspn_code, "306", LEN_RSPN_CODE);
+                ctx->kftc_reply = 1;
+                return ERR_ERR;
+            }
+
+            memcpy(EXMSG1200->err_code, exi0230x.out.err_code,  LEN_EXI0230X_ERR_CODE);
+            memcpy(ctx->err_msg,      , exi0230x.out.err_name,  LEN_EXI0230X_ERR_MSG );
+            err_code = utoa2in(exi0230x.out.err_code,   LEN_EXI0230X_ERR_CODE);
+            SYS_HSTERR(SYS_NN, "");
+        }
+        break;
+    /* --------------------------------------------------- */
+    /* 처리결과 조회인 경우                                     */
+    /* --------------------------------------------------- */
+    case 356200:
+        ctx->tx_num = 3;
+        break;
+    /* --------------------------------------------------- */
+    /* 취급현금입금취소 / 취급제휴입금취소/ 취급추심대전입금 취소       */
+    /* --------------------------------------------------- */
+    case 318100:
+    case 318200:
+        ctx->tx_num = 4;
+        break;
+
+
+    /* --------------------------------------------------- */
+    /* 미결제 어음 통보                                       */
+    /* ssu 부도 출금 tx_num 7,8 번은 검증없음                   */
+    /* ixo0150f에도 in_flag = 0으로 세팅해서 jrn을 update함     */
+    /* --------------------------------------------------- */
+    case 318300:
+    case 330700:
+        ctx->tx_num = 5;
+        break;
+
+    /* --------------------------------------------------- */
+    /* 타행 자기앞 수표 지급                                    */
+    /* --------------------------------------------------- */
+    case 308900:
+    case 318900:
+        ctx->tx_num = 6;
+        break;
+
+    /* --------------------------------------------------- */
+    /* 부도어음 통보                                          */
+    /* --------------------------------------------------- */
+    case 330100:
+    case 330101:
+        ctx->tx_num = 7;
+        break;
+
+    /* --------------------------------------------------- */
+    /* 수취조회인  경우                                        */
+    /* --------------------------------------------------- */
+    case 308700:
+        ctx->tx_num = 8;
+        break;
+
+    /* --------------------------------------------------- */
+    /* 기업구매자금 어음 통보추가                                */
+    /* 기업구매자금어음 거래 역정 조회                            */
+    /* --------------------------------------------------- */
+    case 331800:
+    case 331900:
+        ctx->tx_num = 9;
+        break;
+
+    /* --------------------------------------------------- */
+    /* 취급결번 응답                                          */
+    /* --------------------------------------------------- */
+    case 357100:
+        ix0800d = (ixmsg0800d_t *) ctx->ext_recv_data;
+
+        /* ----------------------------------------------- */
+        /* 결번요구 응답전문의 응답코드가                         */
+        /* "701" (결번처리완료), "702"(결번아님 )인 경우          */
+        /* IXSKN에서 해당 RECORD를 DELTE 한다.                 */
+        /* ----------------------------------------------- */
+        memset(kftc_skip_no,    0x00, sizeof(kftc_skip_no));
+        /* 
+        
+        */
+
+        memcpy(&kftc_skip_no[0], "027",  3);
+        memcpy(&kftc_skip_no[3], ix0800d->skip_msg_no,  6);
+
+        if ((memcmp(ix0800d->rspn_code, "701", 3) == 0) ||
+            (memcmp(ix0800d->rspn_code, "702", 3) == 0)) {
+            EXEC SQL DELETE IXKSKN 
+                      WHERE KFTC_SKIP_NO  = RPAD(:kftc_skip_no, 12 , ' ');
+            switch(SYS_DB_ERRORNUM) {
+            case SYS_DB_SUCCESS:
+            case SYS_DB_NOTFOUND:
+                 sys_tx_commit(TX_CHAINED);
+                 break;
+
+            default:
+                db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+                ex_syslog(LOG_ERROR, "[APPL_DM] %s g000_tx_code_check()"
+                                     "DELETE(IXKSKN) ERROR  :[%d]"
+                                    "[해결방안]ORACLE 담당자 CALL MSG[%s]",
+                                    __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+
+                return ERR_ERR;
+            }
+        }
+        return GOB_NRM;
+
+        default:
+            SYS_HSTERR(SYS_NN, SYS_GENERR, "INVAILD TX_CODE ERROR");
+            return ERR_ERR;
     }
+
+    /* ------------------------------------------------------------ */
+    SYS_DBG("g000_tx_code_check tx_num[%d]", ctx->tx_num);
+    /* ------------------------------------------------------------ */
+
+    SYS_TREF;
+
+    return ERR_NONE;
 
 }
 /* ------------------------------------------------------------------------------------------------------------ */
