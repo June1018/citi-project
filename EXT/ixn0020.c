@@ -1320,6 +1320,58 @@ static int l000_proc_rspn_chk(ixn0020_ctx_t     *ctx)
     SYS_DBG("l000_proc_rspn_chk kftc_orig_flag[%s]", EXPARM->kftc_orig_flag );
     /* ------------------------------------------------------------ */
 
+    if (EXPARM->kftc_orig_flag[0] != '1')
+        return ERR_NONE;
+
+    /* ------------------------------------------------------------ */
+    /* 송수신한 전문과 수신한 전문을 일치하는지 확인한다.                       */
+    /* ------------------------------------------------------------ */
+    memset(&ixi0180x,   0x00, sizeof(ixi0180x_t));
+    ixi0180x.in.in_flag     = '0';
+    ixi0180x.in.tx_num      = ctx->tx_num;
+    ixi0180x.in.exmsg1200   = EXMSG1200;
+    ixi0180x.in.ixjrn       = &ctx->ixjrn;
+    /* EXMSG1200->old_msg_no에 EI_MSG_NO가 채워져 온다.     */
+    memcpy(&ixi0180x.ei_msg_no, &EXMSG1200->old_msg_no, LEN_EXMSG1200_OUR_MSG_NO);
+
+    /* ------------------------------------------------------------ */
+    SYS_DBG("ixi0180x.in.ei_msg_no [%.10s]", ixi0180x.in.ei_msg_no);
+    /* ------------------------------------------------------------ */
+
+    SYS_TRY(ix_orig_verf(&ixi0180x));
+
+    memcpy(ctx->kti_flag,   ixi0180x.out.kti_flag,  LEN_KTI_FLAG);
+
+    /* ------------------------------------------------------------ */
+    SYS_DBG("l000_proc_rspn_chk:ixi0180x.out.rspn_code[%s]  ", ixi0180x.out.rspn_code);
+    SYS_DBG("l000_proc_rspn_chk:ixi0180x.out.kti_flag [%s]  ", ixi0180x.out.kti_flag );
+    SYS_DBG("l000_proc_rspn_chk:ctx->kti_flag         [%s]  ", ctx->kti_flag         );
+    /* ------------------------------------------------------------ */
+
+    /* ------------------------------------------------------------ */
+    /* 만약 에러 발생시에 KFTC로 에러내역을 SET하여 전송한다.                 */
+    /* ------------------------------------------------------------ */
+    if (memcmp(ixi0180x.our.rspn_code, "000", LEN_IXI0180X_RSPN_CODE) != 0 ){
+        ctx->ext_recv_data[IX_IDX_MSG_TYPE] = '9';
+        /* bank code length */
+
+        memcpy(&ctx->ext_recv_data[22], ixi0180x.out.rspn_code, LEN_IXI0180X_RSPN_CODE);
+        ctx->kftc_reply     = 1;
+        ctx->kftc_err_set   = 0;
+        return ERR_ERR;
+    }
+
+    /* TCP/IP 헤더터정보    */
+    utortirm(ixi0180x.out.tcp_head);
+    if (strlen(ixi0180x.out.tcp_head) > 0 ){
+        memset(buff,    0x20, sizeof(buff));
+        memcpy(buff, ixi0180x.out.tcp_head, strlen(ixi0180x.out.tcp_head));
+        rc = sysocbsi(ctx->cb, IDX_TCPHEAD, buff, LEN_TCP_HEAD);
+    }
+
+
+
+
 }
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
