@@ -2253,12 +2253,143 @@ static int s000_host_send(ixn0020_ctx_t     *ctx)
         SYS_DBG("EXMSG1200->err_code [%s]",  EXMSG1200->err_code );
         SYS_DBG("g_arch_head.svc_name[%s]",  g_arch_head.svc_name);
 
-        if (memcmp())
+        if (memcmp(EXMSG1200->err_code, "0000000",  LEN_EXMSG1200_ERR_CODE) != 0){
+            /* 
+                exmsg1200_t.err_pgm_name[LEN_EXMSG1200_ERR_PGM_NAME + 1]; LEN_EXMSG1200_ERR_PGM_NAME    8: exmsg1200.h
+                sysiouth_t.err_file_name[MAX_LEN_FILE_NAME + 1]         ; MAX_LEN_FILE_NAME            30:syscommbuff.h
+                arch_head_t.svc_name[MAX_LEN_SVC_NAME + 1]              ; MAX_LEN_SVC_NAME             16:syscom.h
+                memcpy(sysiouth.err_msg,        ctx->err_msg,   LEN_EXMSG1200_ERR_MSG);
+            */
+            memcpy(sysiouth.err_file_name, g_arch_head.svc_name,   LEN_EXMSG1200_PGM_NAME);
+        } else{
+            memcpy(sysiouth.err_file_name, EXMSG1200->err_pgm_name,   LEN_EXMSG1200_PGM_NAME);
+        }
+
+        rc = sysocbsi(ctx->cb,  IDX_SYSIOUTH,   &sysiouth,  LEN_SYSIOUTH);
+
+        SYS_DBG("==========================================================");
+        SYS_DBG("                   SYSIOUTH                               ");
+        SYS_DBG("==========================================================");
+        SYS_DBG("err_code                :[%07ld]"  , sysiouth.err_code     );
+        SYS_DBG("err_msg                    :[%s]"  , sysiouth.err_msg      );
+        SYS_DBG("err_code                   :[%s]"  , sysiouth.err_file_name);
+        SYS_DBG("==========================================================");
+
+        /* KTI전송시 pswd_1  = '@@@@@@@@@@@@@@@@@@@' - >space    */
+        if ( memcpmp(EXMSG1200->pswd_1, "@@@@@@@@@@@@@@@@", LEN_EXMSG1200_PSWD_1) == 0){
+            memset( EXMSG1200->pswd_1, 0x20,   LEN_EXMSG1200_PSWD_1);
+        }
+
     }
 
+    if (memcmp(&EXMSG1200->cr_acct_no[0], "67690101187137  ", 16) == 0){
+
+        memcpy(EXMSG1200->rcv_cust_name , " C U B A           ", 20);
+    }
+
+    /* -------------------------------------------------------------------------- */   
+    PRINT_EXMSG1200(EXMSG1200);
+    PRINT_EXMSG1200_2(EXMSG1200);
+    /* -------------------------------------------------------------------------- */   
 
 
-}
+    /* 전송데이터 저장   */
+    rc = sysocbsi(ctx->cb,  IDX_HOSTSENDDATA, EXMSG1200,    sizeof(exmsg1200_t));
+
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR,    "[APPL_DM] %s IXN0020: s000_host_send()"
+                                "COMMBUFF(HOSTSENDDATA) SET ERROR "
+                                "[해결방안]시스템 담당자 CALL",
+                                __FILE__);
+        if (ctx->tx_num == 1){
+            sys_tx_rollback(TX_CHAINED);
+            EXPARM->host_rspn_flag[0] = '0';
+            EXPARM->saf_proc_flag[0]  = '1';
+            return ERR_NONE;
+        }
+        return ERR_ERR;
+    }
+
+    SYS_DBG(">>>>>>>>>>>>>>>>>> HOST SEND START >>>>>>>>>>>>>>>>>>>>>>>>");
+
+    /* HOST DATA 전송    */
+    memset(svr_name,    0x00, sizeof(svr_name));
+
+    if (ctx->kti_flag[0] == '1'){
+        memcpy(svr_name,    "KTISEND",      7); /* KTI GW      */
+    }else{
+        memcpy(svr_name,    "SYONHTSEND",  10); /* CORE GW     */
+    }
+
+    /* =================================================================================== */
+    /* 이미지 정보화 서버 온라인 거래 (어음통보/미결제어음 통보 )전송                                    */
+    /* =================================================================================== */
+    if ((memcmp(EXMSG1200->tx_code, "3301000000", LEN_EXMSG1200_TX_CODE) == 0 ||
+         memcmp(EXMSG1200->tx_code, "3307000000", LEN_EXMSG1200_TX_CODE) == 0) &&
+        (memcmp(&EXMSG1200->our_msg_no[0], "I", 1 ) == 0)){
+
+        memcpy(svr_name,    "SYONIMGSEND ", 11);    /* 이미지정보화 서버  */
+
+    }else{
+        /* HOST DATA 전송   */
+        #if defined(SYS_DIRECT_SWAP)
+        #include <exi6961x.h>
+            exi6961x_t  exi6961x;
+            memset(&exi6961x,   0x00,   sizeof(exi6961x_t));
+            memcpy(exi6961x.in.appl_code,  "093", 3);
+            exi6961x.in.in_out_flag = '1';
+            sess_chg_proc(&exi6961x);
+
+            if (exi6961x.out.ch_flag[0] == '0'){
+                /* ---------------------------------------------------- */
+                /* decoupling                                           */
+                /* 시스템구분 (KTI_FLAG 0:GCG 1:ICG)                      */
+                /* 관리전문은 0:GCG로 들어옴                                */
+                /* ---------------------------------------------------- */
+                if (ctx->kti_flag[0] == '1'){
+                    memcpy(svr_name, "KTISEND"    , 7);     /* KTI GW   */
+                }else{
+                    memcpy(svr_name, "SYONHTSEND", 10);     /* CORE GW  */
+                }
+            }
+            else if (exi6961x.out.ch_flag[0] == '1'){
+                memcpy(svr_name,    "SYONUATSEND",   11);
+            }
+            else if (exi6961x.out.ch_flag[0] == '2'){
+                memcpy(svr_name,    "SYONSIT2SEND",  12);
+            }
+            else {
+                memcpy(svr_name,    "SYONUAT2SEND",  12);
+            }
+
+            if (EXPARM->fil11[0] == '1'){
+                memset(svr_name,    0x00,   sizeof(svr_name));
+                memcpy(svr_name, "SYONHTSEND", 10);
+            }
+            else if(EXPARM->fil11[0] == '2'){
+                memcpy(svr_name,    "SYONUATSEND",   11);
+            }
+        #else
+            if (ctx->kti_flag[0] == '1'){
+                memcpy(svr_name, "KTISEND"    , 7);     /* KTI GW   */
+            }else{
+                memcpy(svr_name, "SYONHTSEND", 10);     /* CORE GW  */
+            }
+        #endif
+    }
+
+    /* Decoupling    */
+    /* Host Data전송  */
+
+    SYS_DBG("==========================================================");
+    SYS_DBG("             GCG-ICG-GW-CHECK                             ");
+    SYS_DBG("==========================================================");
+    SYS_DBG("ctx->kti_flag              :[%s]"  , ctx->kti_flag         );
+    SYS_DBG("SVR_NAME                   :[%s]"  , svr_name              );
+    SYS_DBG("==========================================================");
+
+    
+}   
 /* ------------------------------------------------------------------------------------------------------------ */
 
 /* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
