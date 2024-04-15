@@ -2616,7 +2616,39 @@ static int z000_error_proc(ixn0020_ctx_t        *ctx)
 
     /* 전송데이터 저장   */
     len = ctx->ext_recv_data - 9;
-    
+
+    /* 대외기관 전송 데이터 길이 검증    */
+    if (len <= 0){
+        ex_syslog(LOG_ERROR,    "[APPL_DM] %s IXN0020: z000_error_proc()"
+                                "EXT GW SEND ERROR[len: %d] "
+                                "[해결방안]시스템 담당자 CALL",
+                                __FILE__, len);
+        return ERR_ERR;
+    }
+
+    rc = sysocbsi(ctx->cb, IDX_EXTSENDDATA, &ctx->ext_recv_data[9], len);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR,    "[APPL_DM] %s IXN0020: z000_error_proc()"
+                                "COMMBUFF(EXTSENDDATA) ERR "
+                                "[해결방안]시스템 담당자 CALL",
+                                __FILE__);
+        return ERR_ERR;
+    }
+
+    /* 대외기관 전송 데이터 전송     */
+    strcpy(ext_gw_svc_name, "SYEXTGW_IX");
+    rc = sys_tpcall("SYEXTGW_IX", ctx->cb, TPNOTRAN);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR,    "[APPL_DM] %s IXN0020: z000_error_proc()"
+                                "%s 서비스 호출 ERR: [%d:%d] "
+                                "[해결방안]TMAX 담당자 CALL",
+                                __FILE__, ext_gw_svc_name, tperrno, sys_err_code());
+        return ERR_ERR;
+    }
+
+
+    SYS_TREF;
+    return ERR_NONE;
 }
 
 
