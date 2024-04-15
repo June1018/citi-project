@@ -1580,7 +1580,7 @@ static int m100_proc_rspn_chk(ixn0020_ctx_t     *ctx)
             utortrim(func_name);
 
             /* 관리전문 수동처리 서비스 호출    */
-            x000_msg_svc_call(ctx, func_name);
+            x000_mgr_svc_call(ctx, func_name);
     
         }
 
