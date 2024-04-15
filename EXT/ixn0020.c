@@ -308,7 +308,7 @@ static int  r100_ix_tot_proc(ixn0020_ctx_t *ctx);
 static int  r500_host_send_commit(ixn0020_ctx_t *ctx);
 static int  s000_host_send(ixn0020_ctx_t *ctx);
 static int  t000_ix_host_saf_prod(ixn0020_ctx_t *ctx);
-static int  x000_msg_svc_call(ixn0020_ctx_t *ctx);
+static int  x000_mgr_svc_call(ixn0020_ctx_t *ctx);
 static int  z000_error_proc(ixn0020_ctx_t *ctx);
 
 
@@ -2348,23 +2348,29 @@ static int s000_host_send(ixn0020_ctx_t     *ctx)
                 /* ---------------------------------------------------- */
                 if (ctx->kti_flag[0] == '1'){
                     memcpy(svr_name, "KTISEND"    , 7);     /* KTI GW   */
-                }else{
+                }
+                else{
                     memcpy(svr_name, "SYONHTSEND", 10);     /* CORE GW  */
                 }
             }
+
             else if (exi6961x.out.ch_flag[0] == '1'){
                 memcpy(svr_name,    "SYONUATSEND",   11);
+
             }
             else if (exi6961x.out.ch_flag[0] == '2'){
                 memcpy(svr_name,    "SYONSIT2SEND",  12);
+
             }
             else {
                 memcpy(svr_name,    "SYONUAT2SEND",  12);
+
             }
 
             if (EXPARM->fil11[0] == '1'){
                 memset(svr_name,    0x00,   sizeof(svr_name));
                 memcpy(svr_name, "SYONHTSEND", 10);
+
             }
             else if(EXPARM->fil11[0] == '2'){
                 memcpy(svr_name,    "SYONUATSEND",   11);
@@ -2372,8 +2378,10 @@ static int s000_host_send(ixn0020_ctx_t     *ctx)
         #else
             if (ctx->kti_flag[0] == '1'){
                 memcpy(svr_name, "KTISEND"    , 7);     /* KTI GW   */
+
             }else{
                 memcpy(svr_name, "SYONHTSEND", 10);     /* CORE GW  */
+
             }
         #endif
     }
@@ -2388,8 +2396,228 @@ static int s000_host_send(ixn0020_ctx_t     *ctx)
     SYS_DBG("SVR_NAME                   :[%s]"  , svr_name              );
     SYS_DBG("==========================================================");
 
+    if (ctx->kti_flag[0] == '1'){
+        sys_tpcall(utotirm(svr_name), ctx->cb, TPNOTRAN);
+        EXPARM->host_rspn_flag[0] = '0';
+    } else {
+        rc = sys_tpcall(utotirm(svr_name), ctx->cb, TPNOTRAN);
+    }
     
+    if (rc == ERR_ERR){
+        if ((memcmp(EXMSG1200->tx_code, "3301000000", LEN_EXMSG1200_TX_CODE) == 0 ||
+             memcmp(EXMSG1200->tx_code, "3307000000", LEN_EXMSG1200_TX_CODE) == 0) &&
+            (memcmp(&EXMSG1200->our_msg_no[0], "I", 1 ) == 0)){
+            ex_syslog(LOG_ERROR,    "[APPL_DM] %s IXN0020: s000_host_send()"
+                                    "%s 서비스 호출 ERROR[%d:%d] "
+                                    "[해결방안]HOST G/W 담당자 CALL",
+                                    __FILE__), svr_name, tperrno, sys_err_code();
+        }
+        else {
+            ex_syslog(LOG_ERROR,    "[APPL_DM] %s IXN0020: s000_host_send()"
+                                    "%s 서비스 호출 ERROR[%d:%d] "
+                                    "[해결방안]HOST G/W 담당자 CALL",
+                                    __FILE__), svr_name, tperrno, sys_err_code();
+
+        }
+        if (EXPARM->host_rspn_flag[0] == '1'){
+            switch(sys_err_code()){
+            case ERR_SVC_CONERR:
+            case ERR_SVC_NOREADY:
+            case ERR_SVC_SNDERR:
+            case ERR_SVC_TIMEOUT:
+            case ERR_SVC_RCVERR:
+            case ERR_SVC_SVRDOWN:
+            default:
+                EXPARM->saf_proc_flag[0] = '1';
+                break;
+            }
+
+            /* HOST saf 처리함 */
+            sys_tx_rollback(TX_CHAINED);
+            return ERR_NONE;
+        }else{
+            return ERR_ERR;
+        }
+    
+    }
+
+    SYS_DBG(">>>>>>>>>>>>>>>>>>>>>>>>>>> HOST SEND END <<<<<<<<<<<<<<<<<<<<<<<<<<<<<");
+
+    /* 응답 데이터 저장 */
+    if (EXPARM->host_rspn_flag[0] == '1'){
+        EXPARM->saf_proc_flag[0]   = '0';
+        memset(&exmsg1200R, 0x00,   sizeof(exmsg1200R));
+        memcpy(&exmsg1200R, SYSIOUTQ, LEN_EXMSG1200);
+        ix21 = (exmsg1200_ix21_t *) exmsg1200R.detl_area;
+
+        /* -------------------------------------------- */
+        /* HOST 로 부터 "기불능 "으로 경우는 정상처리           */ 
+        /* -------------------------------------------- */
+        if ((memcmp(exmsg1200R.err_code, "0257800", LEN_ERR_CODE) != 0 ) &&
+            (memcmp(exmsg1200R.err_code, "0000000", LEN_ERR_CODE) != 0)){
+            if (ix21->err_rspn_flag[0] == '0'){
+                EXPARM->saf_proc_flag[0] = '1';
+            }
+        }
+    }
+
+    SYS_TREF;
+    return ERR_NONE;
+
 }   
+
 /* ------------------------------------------------------------------------------------------------------------ */
+static int t000_ix_host_saf_prod(ixn0020_ctx_t      *ctx)
+{
+
+    int                 rc  = ERR_NONE;
+    ixi1060f_t          ixi1060f;
+
+
+    SYS_TRSF;
+
+    /* -------------------------------------------------------------------------- */   
+    /* IXHSAF에 전문을  INSERT                                                      */
+    /* -------------------------------------------------------------------------- */
+    if (EXPARM->saf_proc_flag[0] != '1')
+    return ERR_NONE;
+
+    /* -------------------------------------------------------------------------- */   
+    /* IXHSAF에  INSERT                                                            */
+    /* -------------------------------------------------------------------------- */
+    memset(&ixi1060f,   0x00,   sizeof(ixi1060f_t));
+    ixi1060f.in.exmsg1200 = &ctx->exmsg1200;
+    memcpy(ixi1060f.in.ei_msg_no,   &ctx->exmsg1200.old_msg_no, 10);
+
+    memcpy(ixi1060f.in.in_kti_flag, ctx->kti_flag, LEN_IXI1060F_KTI_FLAG);  /* 시스템구분 0:GCG 1:ICG */
+
+    /* ------------------------------------------------------------------------- */
+    SYS_DBG("ctx->exmsg1200 DEBUG");
+    PRINT_EXMSG1200(&ctx->exmsg1200);
+    /* ------------------------------------------------------------------------- */
+
+    SYS_TRY(ix_host_saf_prod(&ixi1060f));
+
+    SYS_TREF;
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    SYS_TREF;
+    return ERR_ERR;
+
+
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int x000_mgr_svc_call(ixn0020_ctx_t      *ctx)
+{
+
+    int                 rc  = ERR_NONE;
+    client_t            client;
+    commbuff_t          dcb;
+
+    SYS_TRSF;
+
+    /* ------------------------------------- */
+    /* 순채무한도 에러 서비스 호출                 */
+    /* ------------------------------------- */
+    memset(&client, 0x00, sizeof(client_t));
+
+    /* 입력전문 사이즈 */
+    client.in.in_msg_len = 17;
+
+    /* 연속처리 유무   */
+    client.in.cont_flag  =  0;
+
+    /* 입력데이터      */
+    memcpy(client.in.is_msg, "P09351           ", clinet.in.in_msg_len  );
+
+    /* commbuff backup */
+    memset(&dcb, 0x00,  sizeof(commbuff_t));
+    rc = sysocbdb(ctx->cb, &dcb);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR,    "[APPL_DM] %s IXN0020: x000_mgr_svc_call()"
+                                "COMMBUFF BACKUP ERR "
+                                "[해결방안]시스템 담당자 CALL",
+                                __FILE__);
+        return ERR_NONE;
+
+    }
+
+    rc = sysocbsi(&dcb, IDX_EXMSG1200, &client, sizeof(client_t));
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR,    "[APPL_DM] %s IXN0020: x000_mgr_svc_call()"
+                                "COMMBUFF BACKUP ERR "
+                                "[해결방안]시스템 담당자 CALL",
+                                __FILE__);
+
+        sysocbfc(&dcb);
+        return ERR_NONE;
+    }
+
+    rc = sys_tpcall("EXN6040F", &dcb, TPNOREPLY | TPNOTRAN);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR,    "[APPL_DM] %s IXN0020: x000_mgr_svc_call()"
+                                " EXN6040F 서비스 호출  ERROR [%d:%d] "
+                                "[해결방안]시스템 담당자 CALL",
+                                __FILE__, tperrno, sys_err_code());
+    }
+
+    sysocbfb(&dcb);
+
+    SYS_TREF;
+    return ERR_NONE;
+
+}
+/* ------------------------------------------------------------------------------------------------------------ */
+static int z000_error_proc(ixn0020_ctx_t        *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    int                 len;
+    char                ext_gw_svc_name[15];
+
+    SYS_TRSF;
+
+    /* -------------------------------------------------------------------------- */
+    SYS_DBG("z000_error_proc: kftc_reply[%s]", ctx->kftc_reply);
+    /* -------------------------------------------------------------------------- */
+
+    /* -------------------------------------------------------------------------- */
+    /* 결제원 에러 응답 전송 여부 체크                                                   */
+    /* -------------------------------------------------------------------------- */
+    if (ctx->kftc_reply != 1)
+        return ERR_ERR;
+
+    /* -------------------------------------------------------------------------- */
+    /* 결제원 에러 응답 전송 여부 체크                                                   */
+    /* -------------------------------------------------------------------------- */
+    if (ctx->kftc_err_set == 1) {
+        ctx->ixi0220x.in.ext_recv_data = ctx->ext_recv_data;
+        ix_kftc_err_set(&ctx->ixi0220x);
+    }
+
+    /* 대외기관 G/W에 호출하는 방식을 전달하기 위한 값을 SET */
+    strcpy(SYSGWINFO->func_name, "X25IXI0");            /* FUNCTION Name        */
+    SYSGWINFO->msg_type     = SYSGWINFO_MSG_ETC;
+    SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_SAF;
+    SYSGWINFO->rspn_flag    = SYSGWINFO_REPLY;
+    SYSGWINFO->time_val     = utoa2ln(EXPARM->time_val, LEN_EXPARM_TIME_VAL);
+    if (SYSGWINFO->time_val <= 0)
+        SYSGWINFO->time_val = SYSGWINFO_SAF_DELT_TIMEOUT;
+
+#ifdef _SIT_DBG
+
+    /* ------------------------------------------------------------------------- */
+    PRINT_IX_KFTC_DEBUG(ctx->ext_recv_data);
+    /* ------------------------------------------------------------------------- */
+#endif
+
+    /* 전송데이터 저장   */
+    len = ctx->ext_recv_data - 9;
+    
+}
+
 
 /* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
