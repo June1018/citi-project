@@ -1789,11 +1789,124 @@ static int n000_ix_host_orig_msg_make(ixn0020_ctx_t     *ctx)
 /* ------------------------------------------------------------------------------------------------------------ */
 static int o000_ix_canc_orig_update(ixn0020_ctx_t       *ctx)
 {
+    
     int                 rc = ERR_NONE;
-    char                kftc_msg_no[LEN_EXMSG1200_IX]
+    char                kftc_msg_no[LEN_EXMSG1200_IX21_ORIG_MSG_NO + 1];
+    char                proc_msg_no[LEN_EXMSG1200_IX21_ORIG_OUR_MSG_NO + 1];    /* 거래고유 번호  */
+    exmsg1200_ix21_t    *ix21;
+
+    SYS_TRSF;
+
+    /* -------------------------------------------------------------------------- */
+    SYS_DBG("o000_ix_canc_orig_update: canc_orig_upd[%s]", EXPARM->canc_org_upd  );
+    /* -------------------------------------------------------------------------- */
+    
+    /* -------------------------------------------------------------------------- */
+    /* 취소시 원저널 update                                                          */
+    /* -------------------------------------------------------------------------- */
+    if (EXPARM->canc_org_upd[0] != '1')
+        return ERR_NONE;
+
+    /* -------------------------------------------------------------------------- */
+    /*  수표거래 요건 변경으로 비교 방법 변경                                             */
+    /* -------------------------------------------------------------------------- */
+    ix21 = (exmsg1200_ix21_t *) ctx->exmsg1200.detl_area;
+    memset(kftc_msg_no, 0x00, sizeof(kftc_msg_no));
+    memset(proc_msg_no, 0x00, sizeof(proc_msg_no));
+    memcpy(proc_msg_no, ix21->orig_our_msg_no,  LEN_EXMSG1200_IX21_ORIG_OUR_MSG_NO);
+
+
+    /* -------------------------------------------------------------------------- */
+    SYS_DBG("o000_ix_canc_orig_update: canc_orig_upd[%s]", EXPARM->canc_org_upd  );
+    /* -------------------------------------------------------------------------- */
+
+
+    EXEC SQL UPDATE  IXJRN 
+        SET     CANC_TYPE     = '1'
+                CANC_MSG_NO   = :ctx->exmsg1200.out_msg_no
+        WHERE   TX_DATE       = :ctx->exmsg1200.tx_date
+        AND     PROC_MSG_NO   = :proc_msg_no
+        AND     KTI_FLAG      = :ctx->kti_flag;
+
+#if 0
+    /* ----------------------------------------------------------------------- */
+    /* 타행 자기앞 지급 거래시 거래 고유번호 12자로 update                              */
+    /* asis IXN0010 : 1924 ~ 1950line 참조                                      */
+    /* ----------------------------------------------------------------------- */
+    if (memcmp(EXMSG1200->tx_code, "3189", 4) == 0){
+        /* orig_msg_no를 더이상 사용하지 않음     */
+        /* memcpy(kftc_msg_no,  ix21->orig_msg_no, LEN_EXMSG1200_IX21_ORIG_MSG_NO); */
+        memcpy(kftc_msg_no, ctx->exmsg1200.msg_no, LEN_EXMSG1200_IX21_ORIG_MSG_NO);
+
+        EXEC SQL UPDATE IXJRN
+                SET     CANC_TYPE       = '1'
+                        ORIG_TX_MSG_NO  = :ctx->exmsg1200.msg_no
+                WHERE   TX_DATE         = :ctx->exmsg1200.tx_date
+                AND     KFTC_MSG_NO     = :kftc_msg_no;
+
+    }
+    else{
+        memcpy(proc_msg_no, ix21->orig_msg_no, LEN_EXMSG1200_IX21_ORIG_MSG_NO);
+
+        EXEC SQL UPDATE IXJRN
+                SET     CANC_TYPE       = '1'
+                        ORIG_TX_MSG_NO  = :ctx->exmsg1200.msg_no
+                WHERE   TX_DATE         = :ctx->exmsg1200.tx_date
+                AND     KFTC_MSG_NO     = :proc_msg_no;
+
+    }
+
+#endif 
+
+    if (SYS_DB_CHK_FAIL){
+        db_sql_error(SYS_DB_ERRORNUM,   SYS_DB_ERRORSTR);
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s o000_ix_canc_orig_update()"
+                                " UPDATE IXJRN ERROR %d"
+                                "[해결방안] ORACLE 담당자 CALL MSG[%s]",
+                            __FILE__ , SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "IXJRN UPDATE ERROR");
+        EXPARM->host_comm_flag[0]    = '1';
+
+        /* 취소거래는 tx_num = 4이므로 타지 않는 로직    */
+        if (tx_num == 1)
+            EXPARM->host_rspn_flag[0] = '1';
+
+        /* 에러코드 set */
+        SET_ERROR_INFO(EXMSG1200);
+
+        /* host에러 응답 */
+        s000_host_send(ctx);
+
+        return ERR_ERR;        
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
 
 }
+
 /* ------------------------------------------------------------------------------------------------------------ */
+static int p000_ixjrn_update(ixn0020_ctx_t      *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    int                 msg_flag = SYS_FALSE;
+    ixi0150f_t          ixi0150f;
+    ixi0151f_t          ixi0151f;
+
+    SYS_TRSF;
+
+    /* -------------------------------------------------------------------------- */
+    SYS_DBG("p000_ixjrn_update: host_send_jrn_upd[%s]", EXPARM->host_send_jrn_upd);
+    /* -------------------------------------------------------------------------- */
+
+    /* -------------------------------------------------------------------------- */
+    /* 원저널 update                                                               */
+    /* -------------------------------------------------------------------------- */
+
+    
+}
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
