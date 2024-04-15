@@ -1904,11 +1904,361 @@ static int p000_ixjrn_update(ixn0020_ctx_t      *ctx)
     /* -------------------------------------------------------------------------- */
     /* 원저널 update                                                               */
     /* -------------------------------------------------------------------------- */
+    if (EXPARM->host_send_jrn_upd[0] != '2')
+        return ERR_NONE;
+
+    memset(&ixi0150f,   0x00,   sizeof(ixi0150f_t));
+    memset(&ixi0151f,   0x00,   sizeof(ixi0151f_t));
+
+    /* 대외기관 에러코드에 대한 호스트 에러 메세지를 저널에 반영    */
+    if (utochksp(ctx->err_msg,  LEN_EXMSG1200_ERR_MSG) == SYS_FALSE) {
+        memcpy(ctx->exmsg1200.err_msg,  ctx->err_msg, LEN_EXMSG1200_ERR_MSG);
+        msg_flag = SYS_TRUE;
+    }
+
+    ixi0150f.in.exmsg1200   = &ctx->exmsg1200;
+    ixi0151f.in.exmsg1200   = &ctx->exmsg1200;
+
+    switch(ctx->tx_num){
+    /* -------------------------------------------------------------------------- */
+    /* 입금 거래인 경우                                                               */
+    /* -------------------------------------------------------------------------- */
+    case 1:
+        ixi0150f.in.ext_recv_data = ctx->ext_recv_data;
+        ixi0150f.in.in_flag       = (ctx->exmsg1200.tx_code[5] - '0') - 1;
+        ixi0150f.in.tx_num        = ctx->tx_num;  
+        SYS_TRY(ix_jrn_upd(&ixi0150f));
+        break;
+
+    /* -------------------------------------------------------------------------- */
+    /* 수표조회 거래인 경우                                                            */
+    /* -------------------------------------------------------------------------- */
+    case 2:
+        ixi0150f.in.ext_recv_data = ctx->ext_recv_data;
+        ixi0150f.in.in_flag       = 0;
+        ixi0150f.in.tx_num        = ctx->tx_num;  
+        SYS_TRY(ix_jrn_upd(&ixi0150f));
+        break;
+
+    /* -------------------------------------------------------------------------- */
+    /* 처리결과 조회인 경우                                                            */
+    /* -------------------------------------------------------------------------- */
+    case 3:
+        ixi0150f.in.ext_recv_data = ctx->ext_recv_data;
+        ixi0150f.in.in_flag       = 0;
+        ixi0150f.in.tx_num        = ctx->tx_num;  
+        SYS_TRY(ix_jrn_upd(&ixi0150f));
+        break;
+
+    /* -------------------------------------------------------------------------- */
+    /* 취급현금 입금취소                                                              */
+    /* 취급제휴 입금취소                                                              */
+    /* 취급추심 대전 입금 취소                                                         */
+    /* -------------------------------------------------------------------------- */
+    case 4:
+        ixi0150f.in.ext_recv_data = ctx->ext_recv_data;
+        ixi0150f.in.in_flag       = 0;
+        ixi0150f.in.tx_num        = ctx->tx_num;  
+        SYS_TRY(ix_jrn_upd(&ixi0150f));
+        break;
+
+    /* -------------------------------------------------------------------------- */
+    /* 미결제 어음통보 거래                                                            */
+    /* -------------------------------------------------------------------------- */
+    case 5:
+        ixi0150f.in.ext_recv_data = ctx->ext_recv_data;
+        ixi0150f.in.in_flag       = 0;
+        ixi0150f.in.tx_num        = ctx->tx_num;  
+        SYS_TRY(ix_jrn_upd(&ixi0150f));
+        break;
+
+
+    /* -------------------------------------------------------------------------- */
+    /* 부도통보  거래                                                                */
+    /* -------------------------------------------------------------------------- */
+    case 7:
+        ixi0150f.in.ext_recv_data = ctx->ext_recv_data;
+        ixi0150f.in.in_flag       = ctx->tx_num;
+        ixi0150f.in.tx_num        = ctx->tx_num;  
+        SYS_TRY(ix_jrn_upd(&ixi0150f));
+        break;
+
+    /* -------------------------------------------------------------------------- */
+    /* 자기앞 수표 지급거래                                                            */
+    /* -------------------------------------------------------------------------- */
+    case 6:
+        ixi0150f.in.ext_recv_data = ctx->ext_recv_data;
+        SYS_TRY(ix_chq_jrn_upd(&ixi0150f));
+        break;
+
+
+    /* -------------------------------------------------------------------------- */
+    /* 수취조회인 경우                                                                */
+    /* -------------------------------------------------------------------------- */
+    case 8:
+        ixi0150f.in.ext_recv_data = ctx->ext_recv_data;
+        SYS_TRY(ix_chq_jrn_upd(&ixi0150f));
+        break;
+
+    /* -------------------------------------------------------------------------- */
+    /* 기업구매 자금 어음통보                                                          */
+    /* -------------------------------------------------------------------------- */
+    case 9:
+        ixi0150f.in.ext_recv_data = ctx->ext_recv_data;
+        ixi0150f.in.in_flag       = ctx->tx_num;
+        ixi0150f.in.tx_num        = ctx->tx_num;  
+        SYS_TRY(ix_jrn_upd(&ixi0150f));
+        break;
+
+    default:
+        break;
+
+    }
+
+    /* 대외기관 에러코드에 대한 호스트 에러 메세지는 호스트로 전송하지 않음     */
+    if (msg_flag == SYS_TRUE)
+        memset(ctx->exmsg1200.err_msg, 0x20, LEN_EXMSG1200_ERR_MSG);
+
+    SYS_TREF;
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    SYS_TREF;
+    return ERR_ERR;
+
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int q000_ixjrn_insert(ixn0020_ctx_t      *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    int                 msg_flag;
+    ixi0140f_t          ixi0140f_t;
+
+
+    SYS_TRSF;
+
+    /* -------------------------------------------------------------------------- */
+    SYS_DBG("q000_ixjrn_insert: host_send_jrn_make[%s]", EXPARM->host_send_jrn_make);
+    /* -------------------------------------------------------------------------- */
+    /* Decoupling */
+    /* 타행환입급불능응답(취급)거래시 host_send_jrn_make 정보에 0이 들어온다.   */
+    if (EXPARM->host_send_jrn_make[0] != '2')
+        return ERR_NONE;
+
+    /* 대외기관 에러코드에 대한 호스트 에러 메세지 저널에 반영  */
+    if (utochksp(ctx->err_msg,  LEN_EXMSG1200_ERR_MSG) == SYS_FALSE){
+        memcpy(ctx->exmsg1200.err_msg,  ctx->err_msg,   LEN_EXMSG1200_ERR_MSG);
+        msg_flag = SYS_TRUE;
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /* JRN 생성                                                                    */
+    /* -------------------------------------------------------------------------- */
+    memset(&ixi0140f, 0x00, sizeof(ixi0140f));
+    ixi0140f.in.exmsg1200       = &ctx->exmsg1200;
+    ixi0140f.in.ext_recv_data   = ctx->ext_recv_data;
+
+    /* 채널구분  */
+    ixi0140f.in.sys_type[0]     = SYSGWINFO_SYS_CORE_BANK + '0';
+
+    /* Decoupling =============================================================== */
+    memcpy(ixi0140f.in.in_new_flag  ,   "NEW"       , 3);       /* NEW.저널생성, INQ중복검증 */
+    memcpy(ixi0140f.in.in_comm_flag ,   "0"         , 1);       /* 0.취급거래,   1.개설거래  */
+    memcpy(ixi0140f.in.in_acct_type , ctx->acct_type, 1);       /* 계좌구분코드             */
+    memcpy(ixi0140f.in.in_ei_msg_no , ctx->exmsg1200.old_msg_no, 10); /* 채번된 EI관리일련번호*/
+
+
+    memcpy(ixi0140f.in.in_kti_flag  , ctx->kti_flag , LEN_IXI0140F_KTI_FLAG);   /* 시스템구분 0:GCG 1:ICG */
+
+    SYS_TRY(ix_jrn_ins(&ixi0140f));
+
+    /* 대외기관 에러코드 대한 호스트 에러 메세지는 호스트로 송신하지 않음  */
+    if (msg_flag  == SYS_TRUE)
+        memset(ctx->exmsg1200.err_msg,  0x20,   LEN_EXMSG1200_ERR_MSG);
+
+    SYS_TREF;
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    SYS_TREF;
+    return ERR_ERR;
+
+
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int r000_ix_tot_proc(ixn0020_ctx_t   *ctx)
+{
+
+    int                 rc  = ERR_NONE;
+    ixi0130f_t          ixi0130f;
+
+    SYS_TRSF;
+
+    /* -------------------------------------------------------------------------- */
+    SYS_DBG("r000_ix_tot_proc: host_send_tot_flag[%s]", EXPARM->host_send_tot_flag);
+    /* -------------------------------------------------------------------------- */
+
+    if (EXPARM->host_send_tot_flag[0] != '2')
+        return ERR_NONE;
+
+    /* -------------------------------------------------------------------------- */
+    /* 집계반영을 한다.                                                               */
+    /* -------------------------------------------------------------------------- */
+    memset(&ixi0130f, 0x00, sizeof(ixi0130f));
+    ixi0130f.in.exmsg1200   = &ctx->exmsg1200;
+
+    SYS_TRY(ix_tot_proc(&ixi0130f));
+
+    SYS_TREF;
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    SYS_TREF;
+    return ERR_ERR;
 
     
 }
+/* Decouplng    ----------------------------------------------------------------------------------------------- */
+/* 집계테이블 처리 IXTOT1                                                                                           */
 /* ------------------------------------------------------------------------------------------------------------ */
+static int r100_ix_tot_proc(ixn0020_ctx_t       *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    ixi0131f_t          ixi0131f;
+
+    SYS_TRSF;
+
+    /* -------------------------------------------------------------------------- */
+    SYS_DBG("r100_ix_tot_proc: host_send_tot_flag[%s]", EXPARM->host_send_tot_flag);
+    /* -------------------------------------------------------------------------- */
+
+    if (EXPARM->host_send_tot_flag[0] != '2')
+        return ERR_NONE;
+
+
+    /* -------------------------------------------------------------------------- */
+    /* 집계반영을 한다.                                                               */
+    /* -------------------------------------------------------------------------- */
+    memset(&ixi0131f, 0x00, sizeof(ixi0131f));
+    memcpy(ixi0131f.in.in_kti_flag, ctx->kti_flag,  1);       /* 시스템구분 0:GCG 1:ICG */
+    ixi0131f.in.exmsg1200   = &ctx->exmsg1200;
+
+    SYS_TRY(ix_tot_proc(&ixi0131f));
+
+    SYS_TREF;
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    SYS_TREF;
+    return ERR_ERR;
+
+}
+
 /* ------------------------------------------------------------------------------------------------------------ */
+static int r500_host_send_commit(ixn0020_ctx_t      *ctx)
+{
+
+    int                 rc = ERR_NONE;
+
+    SYS_TRSF;
+
+    /* -------------------------------------------------------------------------- */
+    SYS_DBG("r500_host_send_commit: host_send_commi[%s]", EXPARM->host_send_commi);
+    /* -------------------------------------------------------------------------- */
+
+    if (EXPARM->host_send_commi[0] != '2')
+        sys_tx_commit(TX_CHAINED);
+
+
+    SYS_TREF;
+    
+    return ERR_NONE;
+
+}
+
 /* ------------------------------------------------------------------------------------------------------------ */
+static int s000_host_send(ixn0020_ctx_t     *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    exmsg1200_t         exmsg1200R;
+    exmsg1200_ix21_t    *ix21;
+
+
+    /* Decoupling =================================================== */
+    char                svr_name[20];
+    char                host_send_data[2000];
+    char                old_msg_no[10+1];
+    int                 host_send_len;
+    /* Decoupling =================================================== */
+
+    SYS_TRSF;
+
+    /* -------------------------------------------------------------------------- */
+    SYS_DBG("s000_host_send: host_comm_flag[%s]", EXPARM->host_comm_flag);
+    /* -------------------------------------------------------------------------- */
+
+    /* -------------------------------------------------------------------------- */
+    /* HOST 통신 여부 검증이 '1'이면 SEND                                              */
+    /* -------------------------------------------------------------------------- */
+    if (EXPARM->host_comm_flag[0] != '1')
+        return ERR_NONE;
+
+    memcpy(EXMSG1200,   &ctx->exmsg1200,    LEN_EXMSG1200);
+    memset(old_msg_no,  0x00,   sizeof(old_msg_no));
+    memcpy(old_msg_no,  &EXMSG1200->old_msg_no, 10);
+
+    SYS_DBG("EXMSG1200->old_msg_no[%s]", EXMSG1200->old_msg_no);
+
+    /* host로 부터 응답을 받을지 여부 SET */
+    EXMSG1200->rspn_flag[0] = EXMSG1200->host_rspn_flag[0];
+
+    /* -------------------------------------------------------------------------- */
+    SYS_DBG("s000_host_send: host_rspn_flag[%s]", EXPARM->host_rspn_flag);
+    /* -------------------------------------------------------------------------- */
+
+    /* HOST G/W에 호출 하는 방식을 전달하기 위한 값을 SET     */
+    SYSGWINFO->time_val     = utoa2ln(EXPARM->time_val, LEN_EXPARM_TIME_VAL);
+    SYSGWINFO->msg_type     = SYSGWINFO_MSG_1200;
+
+    if (EXPARM->host_rspn_flag[0] == '1'){
+        SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_IR;   /* IR방식 호출       */
+        SYSGWINFO->rspn_flag    = SYSGWINFO_SVC_REPLY;      /* HOST로 부터 응답   */
+        if (SYSGWINFO->time_val <= 0)
+            SYSGWINFO->time_val = SYSGWINFO_IR_DELT_TIMEOUT;
+    }
+    else {
+        SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_SAF;  /* SAF방식 호출       */
+        SYSGWINFO->rspn_flag    = SYSGWINFO_REPLY;          /* G/W로 부터의 응답   */
+        if (SYSGWINFO->time_val <= 0)                       /* SAF방식 timeout   */
+            SYSGWINFO->time_val = SYSGWINFO_SAF_DELT_TIMEOUT;
+    }
+
+    /* KTI 전송시에만 셋팅     */
+    if (ctx->kti_flag[0] == '1'){
+        /* 에러 정보를 SYSIOUTH에 설정 KTI전송 추가      */
+        sysiouth_t  sysiouth = {0};
+
+        sysiouth.err_code = utoa2ln(EXMSG1200->err_code,    LEN_EXMSG1200_ERR_CODE);
+
+        SYS_DBG("EXMSG1200->err_code [%s]",  EXMSG1200->err_code );
+        SYS_DBG("g_arch_head.svc_name[%s]",  g_arch_head.svc_name);
+
+        if (memcmp())
+    }
+
+
+
+}
 /* ------------------------------------------------------------------------------------------------------------ */
+
 /* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
