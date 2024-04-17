@@ -295,23 +295,21 @@ static int          a000_data_receive(arn0012_ctx_t *ctx, commbuff_t    *commbuf
     memset((char *)ctx, 0x00, sizeof(arn0012_ctx_t));
     ctx->cb = commbuff;
 
-    if (EXTRECVDATA == NULL) {
-        SYS_HSTERR(SYS_NN, SYS_GENERR, "EXTRECVDATA DATA NOT FOUND");
+    ctx->append_index = 0;
+
+    if (HOSTRECVDATA == NULL) {
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "HOSTRECVDATA IS NOT FOUND");
         return GOB_NRM;
     }
 
     /* 입력 채널 clear */
     SYSICOMM->intl_tx_flag = 0;
 
-    /* 결제원 응답 데이터 길이 set */
-    ctx->ext_recv_len = sysocbgs(ctx->cb, IDX_EXTRECVDATA);
-    memcpy(ctx->ext_recv_data, EXTRECVDATA, ctx->ext_recv_len);
 
-    /* 결제원 에러 응답 조립여부 초기화 (0:조립하지 않음, 1:조립함.)   */
-    ctx->kftc_err_set = 1;
+#ifdef _DBGUG
 
-#ifdef _SIT_DBG
-    PRINT_IX_KFTC_DEBUG(ctx->ext_recv_data);
+    SYS_DBG("RCV_DATA[%.*s]", sysocbgs(ctx->cb, IDX_HOSTRECVDATA), sysocbgs(ctx->cb, IDX_HOSTRECVDATA), sysocbgp(ctx->cb, IDX_HOSTRECVDATA));
+
 #endif
 
     SYS_TREF;
@@ -321,79 +319,139 @@ static int          a000_data_receive(arn0012_ctx_t *ctx, commbuff_t    *commbuf
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int b000_init_proc(arn0012_ctx_t   *ctx, int log_type)
+static int b000_init_proc(arn0012_ctx_t   *ctx)
 {
     int                 rc  = ERR_NONE;
-    ixi0230f_t          ixi0230f;
-    commbuff_t          dcb;
-
+    int                 pay_cnt;
+    char                detl_pay_cnt[LEN_EXMSG1200_AR35_DETL_PAY_CNT + 1];
+    exmsg4000_t         *exmsg4000;
+    ari2130x_t          ari2130x;
+    exi0350f_t          exi0350f;
 
     SYS_TRSF;
 
-    /* --------------------------- */            
-    /* logging                     */
-    /* KFTC_RECV : KFTC -> UNIX    */
-    /* KFTC_SEND : UNIX -> KFTC    */
-    /* --------------------------- */
-    memset(&ixi0230f,   0x00, sizeof(ixi0230f_t));
+    /* KTI 응답 전문 저장  */
+    memcpy(&ctx->kti_recv_data, HOSTRECVDATA,   LEN_EXMSG1200);
 
-    /* 결제원 수신 전문 로깅 */
-    if (log_type == KFTC_RECV_LOG){
-        ixi0230f.in.flag            = 'R';
-        ixi0230f.in.log_type        = 'K';
-        ixi0230f.in.log_len         = ctx->ext_recv_len;
-        memcpy(ixi0230f.in.log_data,  ctx->ext_recv_data, ixi230f.in.log_len);
-    }
-    /* 결제원 송신전문 로깅 */
-    else{
-        ixi0230f.in.flag            = 'S';
-        ixi0230f.in.log_type        = 'K';
-        ixi0230f.in.log_len         = sysocbgs(ctx->cb, IDX_EXTSENDDATA);
-        memcpy(ixi0230f.in.log_data,  EXTSENDDATA, ixi0230f.in.log_len );        
-    }
-    /* ---------------------------------------------------------------------- */
-    SYS_DBG("b000_init_proc: len = [%d]", ixi0230f.in.log_len);
-    SYS_DBG("b000_init_proc: msg = [%s]", ixi0230f.in.log_data);
-    /* ---------------------------------------------------------------------- */
-
-    memset(&dcb,    0x00, sizeof(commbuff_t));
-    rc = sysocbdb(ctx->cb,  &dcb);
+    /* KTI에서 응답받은 1200msg set */
+    rc = sysocbsi(ctx->cb, IDX_EXMSG1200, HOSTRECVDATA, sizeof(exmsg1200_t));
     if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s arn0012: b000_init_proc()"
-                             "COMMBUFF BACKUP ERROR "
-                             "[해결방안]시스템 담당자 call", 
-                             __FILE__);
-        sys_err_init();
-        return ERR_NONE;
+        SYS_HSTERR(SYS_LC, SYS_GENERR, "KTI MSG COMMBUFF ERROR ");
+        return ERR_ERR;
     }
 
-     rc = sysocbsi(&dcb, IDX_EXMSG1200, ixi0230f, sizeof(ixi0230f));
-    if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s arn0012: b000_init_proc()"
-                             "COMMBUFF BACKUP ERROR "
-                             "[해결방안]시스템 담당자 call", 
-                             __FILE__);
-        sys_err_init();
-        sysocbfb(&dcb);
-        return ERR_NONE;
+#ifdef _DBGUG
+    SYS_DBG("호스트 수신 전문");
+    PRINT_EXMSG1200((exmsg1200_t *) HOSTRECVDATA);
+    PRINT_EXMSG1200_2((exmsg1200_t *) HOSTRECVDATA);
+#endif
+
+    /* --------------------------------------------------------------------------- */
+    /* 대외기관 수신전문 조회                                                           */
+    /* --------------------------------------------------------------------------- */
+    memset(ctx->ext_send_data, 0x00, sizeof(ctx->ext_send_data));
+    memset(&exi0350f,   0x00, sizeof(exi0350f_t));
+
+    exi0350f.in.proc_type   = 1;
+    memcpy(exi0350f.in.proc_date,   EXMSG1200->tx_date,     LEN_EXI0350F_PROC_DATE);
+    memcpy(exi0350f.in.appl_code,   AR_CODE,                LEN_EXI0350F_APPL_CODE);
+    memcpy(exi0350f.in.kftc_msg_no, &EXMSG1200->msg_no[1],  LEN_EXI0350F_KFTC_MSG_NO);
+
+    rc = ex_kftc_r_data_proc(&exi0350f);
+
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s ars0011: d000_ext_msg_unformat();"
+                             "ex_kftc_r_data_proc(select) ERROR,",__FILE__ );
+        SET_ERR_RSPN("188");
+        return ERR_ERR;
     }
 
-     rc = sys_tpcall("IXN0230F", &dcb, TPNOREPLY | TPNOTRAN);
-    if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s arn0012: b000_init_proc()"
-                             "IXI0230F 서비스호출 ERROR [%d:%d] "
-                             "[해결방안]TMAX 담당자 call", 
-                             __FILE__, tperrno, sys_err_code());
-        sys_err_init();
+    memcpy(ctx->ext_send_data,  exi0350f.out.kftc_recv_data, strlen(exi0350f.out.kftc_recv_data));
+    //SYS_DBG("DB KFTC RECV DATA [%s]", ctx->ext_recv_data );
 
+    /* 1200을 넘는 전문의 경우 파라미터의 여분8을 필드의 위치에 1200뒤의 데이터를 붙여서 전송 */
+    //여분의 트림값이 숫자인 경우에만 
+    if (utochknm(utotrim(EXPARM->fil8), strlen(utotrim(EXPARM->fil8)))  == SYS_TRUE){
+        ctx->append_index = utoa2in(EXPARM->fil8, LEN_EXPARM_FIL8);
+
+        if (ctx->append_index != 0){
+            pay_cnt = 0;
+            memset(detl_pay_cnt,    0x00, sizeof(detl_pay_cnt));
+
+            //현재일괄납부 건수는 detl_area 86번째 위치함 추후 다른 경우가 있으면 if문 추가 해야함 
+            /* memcpy(detl_pay_cnt, EXMSG1200->detl_area + 86, LEN_EXMSG1200_AR35_DETL_PAY_CNT); 
+
+            pay_cnt = atoi(detl_pay_cnt);
+            SYS_DBG("일괄납부 건수[%d]", detl_pay_cnt);
+
+            ctx->append_size = 90 * pay_cnt;
+            */
+            //일괄납부인 경우 일괄데이터 크기 구함 
+            ctx->append_size = strlne(&ctx->ext_send_data[ctx->append_index]);
+
+            exmsg4000 = (exmsg4000_t *)HOSTRECVDATA;
+
+            SYS_DBG("send to KFTC ctx->append index [%d]", ctx->append_index);
+            SYS_DBG("send to KFTC ctx->append size  [%d]", ctx->append_size);
+            SYS_DBG("exmsg4000->over1200  [%.*s]", ctx->append_size, exmsg4000->over1200);
+        }
     }
 
-    sysocbfb(&dcb);
+    if ((memcmp(EXMSG1200->tx_code, "6728100092", 10) == 0) ||   /* 자기앞수표 사고 조회 */
+        (memcmp(EXMSG1200->tx_code, "6728100192",  6) == 0)) {    /* 가계  수표 사고 조회 */
+
+        ctx->log_type_add = 10;
+
+    }else{
+
+        ctx->log_type_add =  0;
+    }
+
+    /* --------------------------------------------------------------------------- */
+    /* 대외기관 수신전문 삭제                                                           */
+    /* --------------------------------------------------------------------------- */
+    exi0350f.in.proc_type   = 3;
+    rc = ex_kftc_r_data_proc(&exi0350f);
+
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s ars0011: d000_ext_msg_unformat();"
+                             "ex_kftc_r_data_proc(select) ERROR,",__FILE__ );
+        SET_ERR_RSPN("188");
+        return ERR_ERR;
+    }
+
+    /* --------------------------------------------------------------------------- */
+    /* KTI 수신전문 logging                                                          */
+    /* --------------------------------------------------------------------------- */
+    rc = b100_kti_recv_logging(ctx);
+    if (rc == ERR_ERR){
+        return ERR_ERR;
+    }
+
+    /* --------------------------------------------------------------------------- */
+    /* 오류시 대외기관 전문전송 여부 설정                                                  */
+    /* --------------------------------------------------------------------------- */
+    memset(&ari2130x,   0x00, sizeof(ari2130x_t));
+    ari2130x.in.armsg       = ctx->ext_send_data;
+    ari2130x.in.data_len    = strlen(ctx->ext_send_data);
+
+    rc = ar_kftc_fld_chk(&ari2130x);
+
+    /* 오류시 대외기관 전문전송여부는 aro2130x에서 set    */
+    ctx->err_ext_send_flag = ari2130x.out.err_ext_send_flag;
+    if (rc == ERR_ERR){
+        return ERR_ERR;
+    }
+
+    SYS_DBG("ctx->err_ext_send_flag[%d]", ari2130x.out.err_ext_send_flag)
 
     SYS_TREF;
+    
     return ERR_NONE;
     
 }
+
+2024-04-18목요일 시작점....
 /* ------------------------------------------------------------------------------------------------------------ */
 static int c000_host_rspn_chk(arn0012_ctx_t *ctx)
 {
