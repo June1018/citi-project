@@ -179,26 +179,15 @@
 typedef struct arn0012_ctx_s    arn0012_ctx_t;
 struct arn0012_ctx_s {
     commbuff        *cb;  
-
-    int             ext_recv_flag;                  /* 결제원 수신데이터 길이 */
-    int             kftc_err_set;                   /* 결제원 에러 응답 전문조립 여부 */
-    char            host_tx_code[LEN_TX_CODE + 1];  /* 내부 거래코드        */
-    char            ext_recv_data[2000];            /* 대외기관 요청 전문    */
-
-    ixi0220x_t      ixi0220x;
-
-    /* Decoupling ************************************************************/
-    /* kti flag     : exmsg1200->kti_flag를 임시보관하여 사용함                   */
-    /* our_msg_no   : CORE, KTI에서 채번한 관리 일련번호로 exmsg1200->out_msg_no   */
-    /* ei_msg_no    : IXMAX에서 채번한 EI관리일련번호 보관                         */
-    /* acct_type    : exmsg1200->kti_flag의에 값에 따라 조립함                   */
-    /*                b200_max_msg_no_proc에서 조립함                          */
-    /************************************************************************/
-
-    char            kti_flag[LEN_KTI_FLAG + 1];
-    char            out_msg_no[LEN_MQMSG1200_OUT_MSG_NO + 1];
-    char            ei_msg_no[LEN_MQMSG1200_EI_MSG_NO + 1];
-    char            acct_type[LEN_MQMSG1200_CR_ACCT_TYPE +1];   
+    int             err_ext_send_flag               /* GOB_NRM시 대외기관 오류 전송여부 1:send, 0:not send    */
+    char            ext_send_data[2048];            /* 대외기관 송신용 bufffer     */
+    exmsg1200_t     kti_recv_data;                  /* KTI 수신 data            */
+    int             log_type_add;                   /* 1: ARKULOG   2: ARUKLOG   3: ARHULOG   4: ARUHLOG   --> 0 
+                                                      11: ARKULOGC 12: ARUKLOGC 13: ARHULOGC 14: ARUHLOGC  --> 10 */
+    int             saf_create_flag;                /* 1:saf_create  KTI통신후 flag겸          */
+    int             append_index;                   /* 파라미터의 필러로 부터 가지고 오는 값으로      */
+                                                    /* 대외기관 전문의 해당위치 이후 부터 호스트 전송시 1200이후 붙임          */
+    int             append_size;                    /* 1200이후에 추가될 전문의 길이  */
 
 };
 
@@ -207,26 +196,21 @@ struct arn0012_ctx_s {
 /* ------------------------------------- exported global variables definitions -------------------------------- */
 /* ------------------------------------------ exported function  declarations --------------------------------- */
 static int          a000_data_receive(arn0012_ctx_t *ctx, commbuff_t    *commbuff);
-static int          b000_msg_logging(arn0012_ctx_t *ctx, int log_type);
-static int          c000_kftc_fild_chk(arn0012_ctx_t *ctx);
-static int          d000_tran_code_conv(arn0012_ctx_t *ctx);
-static int          e000_exparm_read(arn0012_ctx_t *ctx);
-static int          f000_msg_format(arn0012_ctx_t *ctx);
-/* Decoupling */
-/* KIT FLAG 조회 및 exmsg1200에 조립 */
-static int f100_gcg_icg_acct_chk_proc(arn0012_ctx_t *ctx)
-/******************************************************************************************/
-static int g000_ix_skn_check(arn0012_ctx_t *ctx)
-static int h000_ix_dup_check(arn0012_ctx_t *ctx)
-/* Decoupling */
-/* EI_MSG_NO 최대값 + 1조립  */
-/******************************************************************************************/
-static int h100_max_msg_no_proc(arn0012_ctx_t *ctx)
-/******************************************************************************************/
-static int i000_ixjrn_insert(arn0012_ctx_t *ctx)
-static int j000_ix_host_saf_prod(arn0012_ctx_t *ctx)
-static int k000_kftc_err_send(arn0012_ctx_t *ctx)
-
+static int          b000_init_proc(arn0012_ctx_t *ctx);
+static int          b100_kti_recv_logging(arn0012_ctx_t *ctx);
+static int          c000_host_rspn_chk(arn0012_ctx_t *ctx);
+static int          d000_ext_msg_unformat(arn0012_ctx_t *ctx);
+static int          d200_err_conv(arn0012_ctx_t *ctx);
+static int          e000_jrn_create(arn0012_ctx_t *ctx);
+static int          f000_canc_jrn_update(arn0012_ctx_t *ctx);
+static int          g000_saf_create(arn0012_ctx_t *ctx);
+static int          h000_saf_update(arn0012_ctx_t *ctx);
+static int          i000_tot_proc(arn0012_ctx_t *ctx);
+static int          j000_net_mgr_proc(arn0012_ctx_t *ctx);
+static int          k000_ext_send_msg(arn0012_ctx_t *ctx);
+static int          z000_err_ext_send(arn0012_ctx_t *ctx);
+static int          z100_log_insert(arn0012_ctx_t *ctx, char *log_data, int size, int log_type);
+static int          utoiconv(char *fcode, char *tcode, char *in, size_t in_len, char *out, size_t out_lne);
 
 /* ------------------------------------------------------------------------------------------------------------ */
 int arn0012(commbuff_t  *commbuff)
@@ -241,63 +225,60 @@ int arn0012(commbuff_t  *commbuff)
     /* CONTEXT 초기화  */
     SYS_TRY(a000_data_receive(ctx, commbuff));
 
-    /* 입력전문 LOGGING  */
-    SYS_TRY(b000_msg_logging(ctx, KFTC_RECV_LOG));
+    /* 대외기관 수신로그 처리  */
+    SYS_TRY(b000_init_proc(ctx));
 
-    /* 입력 데이터 검증  */
-    SYS_TRY(c000_kftc_fild_chk(ctx));
+    /* KTI응답 전문 검증  */
+    SYS_TRY(c000_host_rspn_chk(ctx));
 
-    /* 대외기관 거래 코드를 호스트 거래코드 변환   */
-    SYS_TRY(d000_tran_code_conv(ctx));
+    /* 대외기관 송신전문으로  변환   */
+    SYS_TRY(d000_ext_msg_unformat(ctx));
 
-    /* 거래파라메타 조회   */
-    SYS_TRY(e000_exparm_read(ctx));
+    /* 저널생성   */
+    SYS_TRY(e000_jrn_create(ctx));
 
-    /* 1200전문 변환   */
-    SYS_TRY(f000_msg_format(ctx));
+    /* 취소거래시 저널 반영    */
+    SYS_TRY(f000_canc_jrn_update(ctx));
 
-    /* Decoupling     */
-    /* 계좌종류 구분 코드 */
-    SYS_TRY(f100_gcg_icg_acct_chk_proc(ctx));
-    /******************************************************************************************/
-    
-    /* 개설요청 결번 검증   */
-    SYS_TRY(g000_ix_skn_check(ctx));
+    /* 가계수표, 자기앞 수표, 결번조회시 saf생성  */
+    SYS_TRY(g000_saf_create(ctx));
 
-    /* 중복 검증  */
-    SYS_TRY(h000_ix_dup_check(ctx));
+    /* 가계수표, 자기앞 수표, 결번조회시 saf반영   */
+    SYS_TRY(h000_saf_update(ctx));
 
-    /*  Decoupling   **************************************************************************/
-    /* EI관리번호 채번     ***********************************************************************/
-    /******************************************************************************************/
-    SYS_TRY(h100_max_msg_no_proc(ctx));
-    /******************************************************************************************/
+    /* 거래집계 반영   */
+    SYS_TRY(i000_tot_proc(ctx));
 
-    /* 저널 생성 번호 */
-    SYS_TRY(i000_ixjrn_insert(ctx));
+    /*  관리 전문 반영 */
+    SYS_TRY(j000_net_mgr_proc(ctx));
 
-    /* 호스트 SAF처리  */
-    SYS_TRY(j000_ix_host_saf_prod(ctx));
-
+    /* 대외기관 전문 송신  */
+    rc = k000_ext_send_msg(ctx);
 
     SYS_TREF;
     return ERR_NONE;
 
 SYS_CATCH:
 
-    switch(rc){
-    case GOB_NRM;
-        /* 대외기관 무응답   */
-        break;
+    /* GOB_NRM : return ERR_NONE   -- > 정상 commit */
+    /* ERR_ERR : return ERR_ERR    -- > rollback   */
+    /*
+     * 오류시 대외기관 전문 전송여부는 ctx->err_ext_send_flag로 판단 
+     * 0: 미전송 1:전송  
+    */
 
-        default:
-        /* 대외기관 에러 응답 전송   */
-        k000_kftc_err_send(ctx);
-        break;
+    SYS_DBG("ERR_EXT_SEND_FLAG[%d]", ctx->err_ext_send_flag);
+    if (ctx->err_ext_send_flag == 1) {
+        z000_err_ext_send(ctx);
     }
 
-
+    if (rc == GOB_NRM){
+        /* service shell commit  */
+        return ERR_NONE;
+    }
+    
     SYS_TREF;
+    /* service shell rollback  */
     return ERR_ERR;
 }
 
@@ -340,7 +321,7 @@ static int          a000_data_receive(arn0012_ctx_t *ctx, commbuff_t    *commbuf
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int b000_msg_logging(arn0012_ctx_t   *ctx, int log_type)
+static int b000_init_proc(arn0012_ctx_t   *ctx, int log_type)
 {
     int                 rc  = ERR_NONE;
     ixi0230f_t          ixi0230f;
@@ -371,14 +352,14 @@ static int b000_msg_logging(arn0012_ctx_t   *ctx, int log_type)
         memcpy(ixi0230f.in.log_data,  EXTSENDDATA, ixi0230f.in.log_len );        
     }
     /* ---------------------------------------------------------------------- */
-    SYS_DBG("b000_msg_logging: len = [%d]", ixi0230f.in.log_len);
-    SYS_DBG("b000_msg_logging: msg = [%s]", ixi0230f.in.log_data);
+    SYS_DBG("b000_init_proc: len = [%d]", ixi0230f.in.log_len);
+    SYS_DBG("b000_init_proc: msg = [%s]", ixi0230f.in.log_data);
     /* ---------------------------------------------------------------------- */
 
     memset(&dcb,    0x00, sizeof(commbuff_t));
     rc = sysocbdb(ctx->cb,  &dcb);
     if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s arn0012: b000_msg_logging()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s arn0012: b000_init_proc()"
                              "COMMBUFF BACKUP ERROR "
                              "[해결방안]시스템 담당자 call", 
                              __FILE__);
@@ -388,7 +369,7 @@ static int b000_msg_logging(arn0012_ctx_t   *ctx, int log_type)
 
      rc = sysocbsi(&dcb, IDX_EXMSG1200, ixi0230f, sizeof(ixi0230f));
     if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s arn0012: b000_msg_logging()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s arn0012: b000_init_proc()"
                              "COMMBUFF BACKUP ERROR "
                              "[해결방안]시스템 담당자 call", 
                              __FILE__);
@@ -399,7 +380,7 @@ static int b000_msg_logging(arn0012_ctx_t   *ctx, int log_type)
 
      rc = sys_tpcall("IXN0230F", &dcb, TPNOREPLY | TPNOTRAN);
     if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s arn0012: b000_msg_logging()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s arn0012: b000_init_proc()"
                              "IXI0230F 서비스호출 ERROR [%d:%d] "
                              "[해결방안]TMAX 담당자 call", 
                              __FILE__, tperrno, sys_err_code());
@@ -414,7 +395,7 @@ static int b000_msg_logging(arn0012_ctx_t   *ctx, int log_type)
     
 }
 /* ------------------------------------------------------------------------------------------------------------ */
-static int c000_kftc_fild_chk(arn0012_ctx_t *ctx)
+static int c000_host_rspn_chk(arn0012_ctx_t *ctx)
 {
 
     int                 rc = ERR_NONE;
@@ -445,7 +426,7 @@ SYS_CATCH:
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int d000_tran_code_conv(arn0012_ctx_t    *ctx)
+static int d000_ext_msg_unformat(arn0012_ctx_t    *ctx)
 {
     int                 rc  = ERR_NONE;
     exi0250x_t          exi0250x;
@@ -481,7 +462,7 @@ static int d000_tran_code_conv(arn0012_ctx_t    *ctx)
     memcpy(ctx->host_tx_code, exi0250x.out.tx_code, LEN_TX_CODE);
 
     /*------------------------------------------------------------------------ */
-    SYS_DSP(" d000_tran_code_conv:host_tx_code [%s]", ctx->host_tx_code);
+    SYS_DSP(" d000_ext_msg_unformat:host_tx_code [%s]", ctx->host_tx_code);
     /*------------------------------------------------------------------------ */
 
     SYS_TREF;
@@ -492,7 +473,7 @@ static int d000_tran_code_conv(arn0012_ctx_t    *ctx)
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int e000_exparm_read(arn0012_ctx_t   *ctx)
+static int e000_jrn_create(arn0012_ctx_t   *ctx)
 {
     int                 rc  = ERR_NONE;
     exi0210x_t          exi0210x;
@@ -500,7 +481,7 @@ static int e000_exparm_read(arn0012_ctx_t   *ctx)
     SYS_TRSF;
 
     /*------------------------------------------------------------------------ */
-    SYS_DSP(" e000_exparm_read: tx_code [%s]", ctx->host_tx_code);
+    SYS_DSP(" e000_jrn_create: tx_code [%s]", ctx->host_tx_code);
     /*------------------------------------------------------------------------ */
 
     /*------------------------------------------------------------------------ */
@@ -512,7 +493,7 @@ static int e000_exparm_read(arn0012_ctx_t   *ctx)
 
     rc = ex_parm_load(&exi0210x);
     if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s e000_exparm_read(): 거래코드 Loading Error"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s e000_jrn_create(): 거래코드 Loading Error"
                              "host_tx_code/code/msg [%s:%d:%s]"
                              "[해결방안] 업무담당자 CALL",
                              __FILE__, ctx->host_tx_code, sys_err_code(), sys_err_msg());
@@ -522,7 +503,7 @@ static int e000_exparm_read(arn0012_ctx_t   *ctx)
     /* exparm을 commbuff에 저장 */
     rc = sysocbsi(ctx->cb, IDX_EXPARM, &exi0210x.out.exparm, sizeof(exparm_t));
     if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s e000_exparm_read():"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s e000_jrn_create():"
                              "COMMBUFF(EXPARM) SET ERROR host_tx_code[%s]"
                              "[해결방안] 업무담당자 CALL",
                              __FILE__, ctx->host_tx_code);
@@ -537,7 +518,7 @@ static int e000_exparm_read(arn0012_ctx_t   *ctx)
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int f000_msg_format(arn0012_ctx_t    *ctx)
+static int f000_canc_jrn_update(arn0012_ctx_t    *ctx)
 {
     int                 rc  = ERR_NONE;
     ixi1040x_t          ixi1040x;
@@ -547,7 +528,7 @@ static int f000_msg_format(arn0012_ctx_t    *ctx)
     SYS_TRSF;
 
     /*------------------------------------------------------------------------ */
-    SYS_DSP(" f000_msg_format: host_msg_make [%s]", EXPARM->host_msg_make);
+    SYS_DSP(" f000_canc_jrn_update: host_msg_make [%s]", EXPARM->host_msg_make);
     /*------------------------------------------------------------------------ */
 
     if (EXPARM->host_msg_make[0] != '1')
@@ -577,7 +558,7 @@ static int f000_msg_format(arn0012_ctx_t    *ctx)
 
     rc = ex_format(&exi4000x);
     if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_msg_format()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_canc_jrn_update()"
                              "FORMAT ERROR: host_tx_code [%s]"
                              "[해결방안]업무담당자 CALL",
                              __FILE__, ctx->host_tx_code);
@@ -585,7 +566,7 @@ static int f000_msg_format(arn0012_ctx_t    *ctx)
     }
 
     if (exi4000x.out.msg_len <= 0){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_msg_format()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_canc_jrn_update()"
                              "FORMAT ERROR: host_tx_code [%s]"
                              "[해결방안]업무담당자 CALL",
                              __FILE__, ctx->host_tx_code);
@@ -600,7 +581,7 @@ static int f000_msg_format(arn0012_ctx_t    *ctx)
     /*------------------------------------------------------------------------ */
     rc = sysocbsi(ctx->cb, IDX_EXMSG1200,   &exmsg1200, LEN_EXMSG1200);
     if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_msg_format()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_canc_jrn_update()"
                              "COMMBUFF(EXMSG1200) SET ERROR"
                              "[해결방안]업무담당자 CALL",
                              __FILE__);
@@ -925,7 +906,7 @@ static int h100_max_msg_no_proc(arn0012_ctx_t   *ctx)
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int i000_ixjrn_insert(arn0012_ctx_t  *ctx)
+static int i000_tot_proc(arn0012_ctx_t  *ctx)
 {
     int                 rc = ERR_NONE;
     ixi0140x_t          ixi0140x;
@@ -933,7 +914,7 @@ static int i000_ixjrn_insert(arn0012_ctx_t  *ctx)
     SYS_TRSF;
 
     /*------------------------------------------------------------------------ */
-    SYS_DSP("i000_ixjrn_insert : host_send_jrn_make[%s]",  EXPARM->host_send_jrn_make);
+    SYS_DSP("i000_tot_proc : host_send_jrn_make[%s]",  EXPARM->host_send_jrn_make);
     /*------------------------------------------------------------------------ */
 
     if (EXPARM->host_send_jrn_make[0] != '2')
@@ -973,7 +954,7 @@ static int i000_ixjrn_insert(arn0012_ctx_t  *ctx)
         return GOB_ERR;
     default:
 
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s i000_ixjrn_insert()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s i000_tot_proc()"
                              "IXJRN INSERT ERROR"
                              "[해결방안]ORACLE 담당자 CALL",
                              __FILE__);
@@ -995,7 +976,7 @@ static int i000_ixjrn_insert(arn0012_ctx_t  *ctx)
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int j000_ix_host_saf_prod(arn0012_ctx_t  *ctx)
+static int j000_net_mgr_proc(arn0012_ctx_t  *ctx)
 {
     int                 rc  = ERR_NONE;
     ixi1060f_t          ixi1060f;
@@ -1003,7 +984,7 @@ static int j000_ix_host_saf_prod(arn0012_ctx_t  *ctx)
     SYS_TRSF;
 
     /*------------------------------------------------------------------------ */
-    SYS_DSP("j000_ix_host_saf_prod : host_send_jrn_make[%s]",  EXPARM->host_send_jrn_make);
+    SYS_DSP("j000_net_mgr_proc : host_send_jrn_make[%s]",  EXPARM->host_send_jrn_make);
     /*------------------------------------------------------------------------ */    
 
     if (EXPARM->host_send_jrn_make[0] != '2'){
@@ -1018,7 +999,7 @@ static int j000_ix_host_saf_prod(arn0012_ctx_t  *ctx)
 
 
     /* ----------------------------------------------------------------------- */
-    SYS_DSP("j000_ix_host_saf_prod : host_send_jrn_make[%s]",  EXPARM->host_send_jrn_make);
+    SYS_DSP("j000_net_mgr_proc : host_send_jrn_make[%s]",  EXPARM->host_send_jrn_make);
     /* ----------------------------------------------------------------------- */
 
     /* ----------------------------------------------------------------------- */
@@ -1038,7 +1019,7 @@ static int j000_ix_host_saf_prod(arn0012_ctx_t  *ctx)
 #ifdef _DEBUG
     /*------------------------------------------------------------------------ */
     SYS_DBG("================================================================");
-    SYS_DBG("      j000_ix_host_saf_prod : EXMSG1200                         ");
+    SYS_DBG("      j000_net_mgr_proc : EXMSG1200                         ");
     SYS_DBG("================================================================");
     PRINT_EXMSG1200(EXMSG1200);
     PRINT_EXMSG1200_2(EXMSG1200);
@@ -1051,7 +1032,7 @@ static int j000_ix_host_saf_prod(arn0012_ctx_t  *ctx)
 
 SYS_CATCH:
 
-    ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0040: j000_ix_host_saf_prod()"
+    ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0040: j000_net_mgr_proc()"
                          "SAF INSERT ERROR"
                          "[해결방안]ORACLE 담당자 CALL",
                           __FILE__);
@@ -1067,7 +1048,7 @@ SYS_CATCH:
 
 }
 /* ------------------------------------------------------------------------------------------------------------ */
-int static k000_kftc_err_send(arn0012_ctx_t *ctx)
+int static k000_ext_send_msg(arn0012_ctx_t *ctx)
 {
     int                 rc  = ERR_NONE;
     int                 len;
@@ -1087,7 +1068,7 @@ int static k000_kftc_err_send(arn0012_ctx_t *ctx)
 
     /* 대외기관 전송데이터 길이 검증     */
     if (len <= 0){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0020: k000_kftc_err_send()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0020: k000_ext_send_msg()"
                              "EXT GW LEN ERROR [len=%d]"
                              "[해결방안]ORACLE 담당자 CALL",
                              __FILE__, len);
@@ -1111,7 +1092,7 @@ int static k000_kftc_err_send(arn0012_ctx_t *ctx)
     /* output queue 에 데이터 저장  */
     rc = sysocbsi(ctx->cb, IDX_EXTSENDDATA, &ctx->ext_recv_data[9], len);
     if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0040: k000_kftc_err_send()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0040: k000_ext_send_msg()"
                         "COMMBUFF(EXTSENDDATA) SET ERROR"
                         "[해결방안]시스템 담당자 CALL",
                         __FILE__);
@@ -1124,7 +1105,7 @@ int static k000_kftc_err_send(arn0012_ctx_t *ctx)
     
     strcpy(ext_gw_svc_name, "SYEXTGW_IX");
     if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0040: k000_kftc_err_send()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0040: k000_ext_send_msg()"
                         "%s 서비스 호출 ERROR [%d:%d]: func_name[%s]"
                         "[해결방안]대외기관 G/W 담당자 CALL",
                         __FILE__, ext_gw_svc_name, tperrno, sys_err_code(),
@@ -1133,7 +1114,7 @@ int static k000_kftc_err_send(arn0012_ctx_t *ctx)
     }
 
     /* 결제원 송신 전문 로깅 */
-    b000_msg_logging(ctx, KFTC_SEND_LOG);
+    b000_init_proc(ctx, KFTC_SEND_LOG);
 
     SYS_TREF;
 
