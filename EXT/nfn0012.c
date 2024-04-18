@@ -96,11 +96,9 @@ static int  z100_log_insert(nfn0012_ctx_t *ctx,  char *log_data, int size, char 
 /* ------------------------------------------------------------------------------------------------------------ */
 int nfn0012(commbuff_t   commbuff)
 {
-
     int                 rc = ERR_NONE;
     nfn0012_ctx_t       _ctx;  
     nfn0012_ctx_t       *ctx = &_ctx;
-
 
     SYS_TRSF;
 
@@ -110,43 +108,30 @@ int nfn0012(commbuff_t   commbuff)
     /* 초기화 처리  */
     SYS_TRY(b000_init_proc(ctx));
 
-    /* NFJRN Insert   */
-    SYS_TRY(d000_jrn_insert(ctx));
+    /* NFJRN Insert   
+    SYS_TRY(c000_sel_jrn_proc(ctx));*/
 
-    /* 대외기관 전문 전송  */
+    /* 대외기관 SEND  */
+    SYS_TRY(e000_ext_msg_send(ctx));
+
+    /* nfjrn update   */
     SYS_TRY(f000_upd_jrn_proc(ctx));
-
-    SYSGWINFO->gw_rspn_send = SYSGWINFO_GW_REPLY_SEND_NO;
 
     SYS_TREF;
     return ERR_NONE;
 
 SYS_CATCH:
 
-    switch(rc) {
-
-        case GOB_ERR:
-            SYS_TREF;
-
-            /* 호스트에 무응답 */
-            SYSGWINFO->gw_rspn_send = SYSGWINFO_GW_REPLY_SEND_NO;
-            return ERR_ERR;
-
-        /* 비밀번호 변경 전문일 경우에는 GW전송 안하고 처리한다. */
-        case GOB_NRM:
-            SYS_TREF;
-            return ERR_NONE;
-        
-        default:
-            z000_error_proc(ctx);
-            break;
-
+    if (rc == GOB_NRM) {
+        SYS_DBG("RETURN ERR_NONE");
+        return ERR_NONE;
     }
 
-    SYS_TREF;
-    return ERR_ERR;
-        
+    x000_nf_err_log(ctx);
 
+    SYS_TREF;
+
+    return ERR_ERR;
 }
 /* ------------------------------------------------------------------------------------------------------------ */
 static int a000_data_receive(nfn0012_ctx_t  *ctx, commbuff_t  commbuff)
