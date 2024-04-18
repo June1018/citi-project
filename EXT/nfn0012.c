@@ -137,7 +137,9 @@ SYS_CATCH:
 static int a000_data_receive(nfn0012_ctx_t  *ctx, commbuff_t  commbuff)
 {
     int                 rc = ERR_NONE;
-    char                tmp_rcv_data[100 + 1];
+    char                *hp;
+    char                tx_no [ 9 + 1];
+    hcmihead_t          hcmihead;
 
     SYS_TRSF;
 
@@ -145,56 +147,32 @@ static int a000_data_receive(nfn0012_ctx_t  *ctx, commbuff_t  commbuff)
     memset((char *)ctx, 0x00, sizeof(nfn0012_ctx_t));
     ctx->cb = commbuff;
     
-
-
-    /**
-    memset(tmp_rcv_data, 0x00, sizeof(tmp_rcv_data));
-    memcpy(tmp_rcv_data, &HOSTRCVDATA,[300 + 265], 100);
-
-utohexdp(tmp_rcv_data, 100);
-
-
-    SYS_DBG("tmp_rcv_data[%s]", tmp_rcv_data);
-    printf("tmp_rcv_data[", sizeof(tmp_rcv_data));
-    int tmp = 0;
-    for (tmp = 0 ; tmp < sizeof(tmp_rcv_data); tmp ++){
-        printf("%02X", tmp_rcv_data[tmp]);
-    }
-    printf("]"\n);
-    **/
-
-    SYS_TREF;
-
-    return ERR_NONE;
-
-}
-/* ------------------------------------------------------------------------------------------------------------ */
-static int b000_init_proc(nfn0012_ctx_t *ctx)
-{
-
-    int                 rc = ERR_NONE;
-    hcmihead_t          hcmihead;
-    char                *hp;
-
-    SYS_TRSF;
-
+    SYS_ASSERT(HOSTRECVDATA);
 
     /* 입력 채널 clear */
     SYSICOMM->intl_tx_flag = 0;
     memset(SYSICOMM->call_svc_name, 0,  sizeof(SYSICOMM->call_svc_name));
-    memcpy(SYSICOMM->call_svc_name, "nfn0012", 7);
+    memcpy(SYSICOMM->call_svc_name, "NFN0012", 7);
 
     ctx->exmsg1500 = &ctx->_exmsg1500;
 
+    SYS_DBG(" HOSTRECVDATA LEN[%d]", sysocbgp(ctx->cb, IDX_HOSTRECVDATA));
+    SYS_DBG(" HOSTRECVDATA [%s]"   , HOSTRECVDATA);
+
+
+#ifdef  _DEBUG
+
+    /* --------------------------------------------------- */
+    PRINT_EXMSG1500(EXMSG1500);
+    /* --------------------------------------------------- */
+
+#endif 
+    /* 저널 데이터 셋팅      */
+    memset(tx_no,    0x00, sizeof(tx_no));
     /* host 수신 msg저장   */
     memcpy(ctx->exmsg1500, HOSTRECVDATA,    sysocbgs(ctx->cb, IDX_HOSTRECVDATA));
     memcpy(EXMSG1500->err_code,  "9999999"  , LEN_EXMSG1500_ERR_CODE);
 
-#ifdef  _DEBUG
-    /* --------------------------------------------------- */
-    PRINT_EXMSG1500(EXMSG1500);
-    /* --------------------------------------------------- */
-#endif 
 
     //참가기관 정보 저장 후 BOK에 송신 하지 않고, 종료 처리 
     if (memcmp(&EXMSG1500->detl_area[15], "88", 2) == 0){
@@ -263,6 +241,46 @@ static int b000_init_proc(nfn0012_ctx_t *ctx)
 
     SYS_TREF;
     return ERR_NONE;
+    /**
+    memset(tmp_rcv_data, 0x00, sizeof(tmp_rcv_data));
+    memcpy(tmp_rcv_data, &HOSTRCVDATA,[300 + 265], 100);
+
+utohexdp(tmp_rcv_data, 100);
+
+
+    SYS_DBG("tmp_rcv_data[%s]", tmp_rcv_data);
+    printf("tmp_rcv_data[", sizeof(tmp_rcv_data));
+    int tmp = 0;
+    for (tmp = 0 ; tmp < sizeof(tmp_rcv_data); tmp ++){
+        printf("%02X", tmp_rcv_data[tmp]);
+    }
+    printf("]"\n);
+    **/
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
+/* ------------------------------------------------------------------------------------------------------------ */
+static int b000_init_proc(nfn0012_ctx_t *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    hcmihead_t          hcmihead;
+    char                *hp;
+
+    SYS_TRSF;
+
+
+    /* 입력 채널 clear */
+    SYSICOMM->intl_tx_flag = 0;
+    memset(SYSICOMM->call_svc_name, 0,  sizeof(SYSICOMM->call_svc_name));
+    memcpy(SYSICOMM->call_svc_name, "nfn0012", 7);
+
+    ctx->exmsg1500 = &ctx->_exmsg1500;
+
+
 
 }
 
