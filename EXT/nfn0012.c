@@ -169,93 +169,50 @@ static int a000_data_receive(nfn0012_ctx_t  *ctx, commbuff_t  commbuff)
 #endif 
     /* 저널 데이터 셋팅      */
     memset(tx_no,    0x00, sizeof(tx_no));
-    /* host 수신 msg저장   */
-    memcpy(ctx->exmsg1500, HOSTRECVDATA,    sysocbgs(ctx->cb, IDX_HOSTRECVDATA));
-    memcpy(EXMSG1500->err_code,  "9999999"  , LEN_EXMSG1500_ERR_CODE);
-
-
-    //참가기관 정보 저장 후 BOK에 송신 하지 않고, 종료 처리 
-    if (memcmp(&EXMSG1500->detl_area[15], "88", 2) == 0){
-        rc = c000_sel_jrn_proc(ctx);
-        if (rc == ERR_NONE){
-            return GOB_NRM;
-        }else{
-            return ERR_ERR;
-        }
-    }
-
-    EXEC SQL 
-        SELECT TO_NUMBER(TRIM(MIR_CODE))
-          INTO :nf_on_session_flag
-          FROM excode
-         WHERE maj_code = 'NF_ON_SESSION_FLAG';
-
-    SYS_DBG("nf_on_session_flag[%d]", nf_on_session_flag);
-
-    if (nf_on_session_flag != 9){
-        SYS_HSTERR(SYS_LN, 9999999, "BEFORE SESSION KEY EXCHANGE ");
-        SYS_TREF;
-        return ERR_ERR;        
-    }
-
+    memcpy(tx_no,   &HOSTRECVDATA[300 + 4], 9);
     
-    memcpy(ctx->msg_no      , &EXMSG1500->detl_area[15],  2);
-    memcpy(&ctx->msg_no[2]  , &EXMSG1500->detl_area[32],  6);
-
+    memcpy(ctx->msg_type,       &HOSTRECVDATA[300 + 13], 2);
+    memcpy(ctx->msg_no,         &HOSTRECVDATA[300 + 15], 2);
+    memcpy(ctx->msg_no[2],      &HOSTRECVDATA[300 + 32], 6);
+    
     //전문관리 번호 추가 다른 전문일 경우에는  9900000로 세팅한다.
-    if (memcmp(&EXMSG1500->detl_area[15], "TEJG00001", 9) == 0){
-        memcpy(&ctx->msg_no[8], &EXMSG1500->detl_area[38],  7);
+    if (memcmp(tx_no, "TEJG00001", 9) == 0){
+        memcpy(&ctx->msg_no[8], &HOSTRECVDATA[300 + 38],  7);
     }else{
         memcpy(&ctx->msg_no[8], "9900000",  7);
     }
 
-    SYS_DBG("ctx->msg_no [%s]", ctx->msg_no);
-
-    ctx->recv_len = utoa2in(EXMSG1500->detl_rec_size, LEN_EXMSG1500_DETL_REC_SIZE);
-    SYS_DBG("ctx->recv_len[%d]", ctx->recv_len);
-
-    SYS_DBG("SYSGWINFO->sys_type[%d]",  SYSGWINFO->sys_type);
-
-    memset(ctx->corr_id, 0x00, LEN_NFI0002F_CORR_ID);
+    SYS_DBG("ctx->msg_no [%s]tx_no[%s]", ctx->msg_no, tx_no);
 
 
-    /* KTI여부 (0:코어 2:KTI )   */
-    if (SYSGWINFO->sys_type == 2){
-        ctx->kti_flag = '1';
-    
-        /* TCP/IP 통신 헤더 정보 */
-        hp = sysocbgp(ctx->cb, IDX_TCPHEAD);
-        if (hp != NULL){
-            memset(&hcmihead,   0x00, sizeof(hcmihead_t));
-            memcpy(&hcmihead,   hp,   sysocbgs(ctx->cb, IDX_TCPHEAD));
+    /*
+        if (memcmp(tx_no, "TEJG00001", 9) == 0){
+        memcpy(&ctx->msg_no[8], &HOSTRECVDATA[300 + 38],  7);
+    }else{
+        memcpy(&ctx->msg_no[8], "9900000",  7);
+    }
+    */
+    memcpy(ctx->trace_no,   &HOSTRECVDATA[300 + 38], 7);
+    SYS_DBG("ctx->msg_no [%s]ctx->trace_no[%s]ctx->msg_type[%s]", ctx->msg_no, ctx->trace_no, ctx->msg_type);
 
-            memcpy(ctx->corr_id,    hcmihead.queue_name, LEN_HCMIHEAD_QUEUE_NAME);
-            SYS_DBG("corr_id [%s]", ctx->corr_id);
-        }else {
-            SYS_DBG("b000_init_proc :TCPHEAD ");
-            return GOB_ERR;
-        }
+
+    /* set corr_id   */
+    /* TCP/IP통신 헤더 정보    */
+    hp = sysocbgp(ctx->cb, IDX_TCPHEAD);
+    if (hp != NULL){
+        memset(&hcmihead, 0x00, sizeof(hcmihead));
+        memcpy(&hcmihead, hp, sysocbgs(ctx->cb, IDX_TCPHEAD));
+
+        /*  set corr_id  */
+        memcpy(ctx->corr_id, hcmihead.queue_name,  LEN_HCMIHEAD_QUEUE_NAME);
+        memcpy(ctx->tx_code, hcmihead.tx_code,     LEN_HCMIHEAD_TX_CODE);
     }else {
-        ctx->kti_flag = '0';
+        SYS_DBG("a000_data_recevie : TCP_HEAD is null");
+        return GOB_ERR;
     }
-
-    SYS_TREF;
-    return ERR_NONE;
-    /**
-    memset(tmp_rcv_data, 0x00, sizeof(tmp_rcv_data));
-    memcpy(tmp_rcv_data, &HOSTRCVDATA,[300 + 265], 100);
-
-utohexdp(tmp_rcv_data, 100);
-
-
-    SYS_DBG("tmp_rcv_data[%s]", tmp_rcv_data);
-    printf("tmp_rcv_data[", sizeof(tmp_rcv_data));
-    int tmp = 0;
-    for (tmp = 0 ; tmp < sizeof(tmp_rcv_data); tmp ++){
-        printf("%02X", tmp_rcv_data[tmp]);
-    }
-    printf("]"\n);
-    **/
+    
+    ctx->kti_recv_len = sysocbgs(ctx->cb,  IDX_HOSTRECVDATA);
+    ctx->kti_flag = '1' ; /* 1:ICG   */
 
     SYS_TREF;
 
@@ -267,21 +224,32 @@ static int b000_init_proc(nfn0012_ctx_t *ctx)
 {
 
     int                 rc = ERR_NONE;
-    hcmihead_t          hcmihead;
-    char                *hp;
-
+    int                 send_len = 0;
     SYS_TRSF;
 
+    /* HOST 수신 메세지 저장   */
+    SYS_DBG("HOSTRECVDATA ==> [%s][%s]", HOSTRECVDATA, sysocbgs(ctx->cb, IDX_HOSTRECVDATA));
+    memcpy(ctx->exmsg1500, HOSTRECVDATA, sysocbgs(ctx->cb, IDX_HOSTRECVDATA));
+    send_len = utoa2in(EXMSG1500->detl_rec_size, LEN_EXMSG1500_DETL_REC_SIZE);
 
-    /* 입력 채널 clear */
-    SYSICOMM->intl_tx_flag = 0;
-    memset(SYSICOMM->call_svc_name, 0,  sizeof(SYSICOMM->call_svc_name));
-    memcpy(SYSICOMM->call_svc_name, "nfn0012", 7);
+#ifdef  _DEBUG
+    /* --------------------------------------------------- */
+    PRINT_EXMSG1500(EXMSG1500);
+    /* --------------------------------------------------- */
+#endif 
 
-    ctx->exmsg1500 = &ctx->_exmsg1500;
+    /* EXT전송 데이터 저장    */
+    rc = sysocbsi(ctx->cb, IDX_EXTSENDDATA, EXMSG1500DETL, send_len);
+    if (rc == ERR_ERR){
+        SYS_HSTERR(SYS_LN, SYS_GENERR, "COMMBUFF SET ERROR");
+        return ERR_ERR;
+    }
 
+    SYS_DBG("EXTSENDDATA[%d][%s]", sysocbgs(ctx->cb, IDX_EXTSENDDATA), EXTSENDDATA);
 
+    SYS_TREF;
 
+    return ERR_NONE;
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
@@ -289,66 +257,51 @@ static int c000_sel_jrn_proc(nfn0012_ctx_t     *ctx)
 {
 
     int                 rc = ERR_NONE;
-    char                send_name [20 + 1];
-    char                send_pswd [ 8 + 1];
-
-
-
-
-    SYS_TRSF;
-
-    memset(send_name,   0x00, sizeof(send_name));
-    memset(send_pswd,   0x00, sizeof(send_pswd));
-
-    memcpy(send_name,   &EXMSG1500->detl_area[114], 20);
-    memcpy(send_pswd,   &EXMSG1500->detl_area[134],  8);
-
-    SYS_DBG("send name [%s] send_pswd[%s]", send_name, send_pswd);
-
-    EXEC SQL 
-        UPDATE EXINSTSQ 
-           SET send_name        = :send_name 
-             , send_pswd        = :send_pswd
-             , proc_date        = TO_CHAR(SYSDATE, 'YYYYMMDD')
-         WHERE inst_no          = '926'
-           AND appl_code        = '020';
-
-    if (SYS_DB_CHK_FAIL){
-        db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s c000_sel_jrn_proc: UPDATE EXINSTSQ %d%d"
-                             "[해결방안] 업무담당자 CALL ", __FILE__ , SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
-        SYS_HSTERR(SYS_NN, SYS_GENERR, "update EXINSTSQ ERROR");
-        return ERR_ERR;
-    }
-
-    SYS_TREF;
-
-    return ERR_NONE;
-
-SYS_CATCH:
-
-    return ERR_ERR;
-    
-}
-
-/* ------------------------------------------------------------------------------------------------------------ */
-static int d000_jrn_insert(nfn0012_ctx_t    *ctx)
-{
-
-    int                 rc = ERR_NONE;
-    
-
     nfi0002f_t          nfi0002f;
 
     SYS_TRSF;
 
-    SYS_DBG("#1");
-    memset(&nfi0002f,   0x00, sizeof(nfi0002f_t));
+    memset(nfi0002f,   0x00, sizeof(nfi0002f_t));
 
-    SYS_DBG("#2");
-    nfi0002f.in.exmsg1500 = EXMSG1500;
+    nfi0002f.in.exmsg1500 = (exmsg1500_t *) EXMSG1500;
+    memcpy(&nfi0002f.in.msg_no,      ctx->msg_no,    LEN_NFI0002F_MSG_NO);
+    memcpy(&nfi0002f.in.msg_type,    ctx->msg_type,  LEN_NFI0002F_MSG_TYPE);
+    memcpy(&nfi0002f.in.trace_no,    ctx->trace_no,  LEN_NFI0002F_TRACE_NO);
+    utodate1(ctx->proc_date);
+    memcpy(&nfi0002f.in.proc_date,   ctx->proc_date, LEN_NFI0002F_PROC_DATE);
 
-    SYS_DBG("#3");
+    rc = nf_jrn_sel(&nfi0002f);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s c000_sel_jrn_proc ERROR", __FILE__ );
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "NF_JRN_SEL_ERROR");
+        return ERR_ERR;
+    }
+
+    /* -------------------------------------------------------------------- */
+    SYS_DBG("nfjrn select ");
+    PRINT_EXMSG1500(EXMSG1500);
+    /* -------------------------------------------------------------------- */
+
+    /* set kti_flag  */
+    memset(ctx->corr_id, 0x00, LEN_NFJRN_CORR_ID);
+    memcpy(ctx->corr_id, nfi0002f.out.nfjrn.corr_id, LEN_NFJRN_CORR_ID);
+
+    SYS_DBG("ctx->corr_id[%s]", ctx->corr_id);
+    
+    SYS_TREF;
+
+    return ERR_NONE;
+    
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int e000_ext_msg_send(nfn0012_ctx_t    *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    
+    SYS_TRSF;
+
     memcpy(nfi0002f.in.msg_no,  ctx->msg_no,    LEN_NFI0002F_MSG_NO);       /* msg_no     */
     memcpy(nfi0002f.in.corr_id, ctx->corr_id,   LEN_NFI0002F_CORR_ID);      /* corr_id    */
     nfi0002f.in.kti_flag[0] = ctx->kti_flag;
