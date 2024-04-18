@@ -1,4 +1,20 @@
 [실시간 외환자금이체 회의내용]
+
+2024-04-18 목요일 주간업무 회의 
+EI결제원 방화벽 작업완료 
+EI->KTI거래코드 협의 (차주 협의 )
+BRD Decision 
+1. 수수료, 환율 
+2. Preventative Payment Control :개발요건 최종확정 
+   1) Threshold
+   2) Duplicated Payment Control
+   3) Re-key
+
+   FRD review session (4/29일까지 주1회)
+   DWH등 Downstream영향도 분석 - AML모니터링 ICD협의
+   EI->KTI거래코드 협의 
+   
+
 2024-04-15 월요일 업무 회의 
 Work flow 작성 
 Sacntion Screen ICG 자체적으로 나오고 
