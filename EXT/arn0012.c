@@ -451,34 +451,94 @@ static int b000_init_proc(arn0012_ctx_t   *ctx)
     
 }
 
-2024-04-18목요일 시작점....
+/* ------------------------------------------------------------------------------------------------------------ */
+static int b100_kti_recv_logging(arn0012_ctx_t  *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    exi0280_t           exi0280;
+    exmsg4000_t         exmsg4000;
+
+    SYS_TRSF;
+
+    /* logging KTI -> UNIX 
+     * KTI와 거래 로그를 생략 추가 
+     * 로그사이즈가 2048이 넘을 경우 메모리 dump발생됨, 그래서 skip시킴
+     #define LEN_EXI0280_DATA       2048
+    */
+    if (EXPARM->fil5[0] == '1'){
+        return ERR_NONE;
+    }
+
+    /* KTI송신 1200전문 null trim */
+    memset(&exi0280,    0x00,   sizeof(exi0280_t));
+    exi0280.in.type  = 2;       /* NULL TRIM     */
+    memcpy(exi0280.in.data, HOSTRECVDATA,   sizeof(exmsg1200_t));
+
+    rc = exmsg1200_null_proc(&exi0280);
+    if (rc == ERR_ERR){
+        SET_ERR_RSPN("188");
+        return ERR_ERR;
+    }
+
+    /*
+    
+    
+    
+    
+    */
+    memcpy(&exi0280.out.data[sizeof(exmsg1200_comm_t)],  ctx->ext_send_data + ctx->append_index, ctx->append_size);
+
+    SYS_DBG("strlen(exi0280.out.data)[%d]",strlen(exi0280.out.data));
+    SYS_DBG("ctx->append_size[%d]", ctx->append_size);
+
+    SYS_DBG("exi0280.out.data[%d][%.*s]", strlen(exi0280.out.data), strlen(exi0280.out.data)+ctx->append_size, exi0280.out.data);
+
+    rc = z100_log_insert(ctx, exi0280.out.data, strlen(exi0280.out.data), 3 + ctx->log_type_add);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s ars0011: b100_kti_recv_logging();"
+                             "AR_LOG_ERR log_type [%d],",__FILE__, 3 + ctx->log_type_add );
+        
+        sys_err_init();
+        
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
 /* ------------------------------------------------------------------------------------------------------------ */
 static int c000_host_rspn_chk(arn0012_ctx_t *ctx)
 {
 
     int                 rc = ERR_NONE;
-    ixi0220x_t          ixi0220x;
+    ari2120x_t          ari2120x;
 
+    /* Host 응답전문 검증 */
     SYS_TRSF;
 
-    memset(&ixi0200x, 0x00, sizeof(ixi0200x_t));
-    ixi0200x.in.ext_recv_data = ctx->ext_recv_data;
+    if (EXPARM->host_comm_flag[0] != '1'){
+        return ERR_NONE;
+    }
 
-    /* ------------------------------------------------------------------------- */
-    /* 필드 validation  check                                                     */
-    /* ------------------------------------------------------------------------- */
-    SYS_TRY(ix_kftc_fild_val(&ixi0200x));
+    /*
+    memset(&ari2120x,   0x00, sizeof(ari2120x_t));
+    ari2120x.in.send1200    = (exmsg1200_t *)HOSTSENDDATA;
+    ari2120x.in.recv1200    = &ctx->kti_recv_data;
+    ari2120x.in.detl_type   = EXPARM->detl_msg_type;
+
+    rc = ar_msg1200_rspn_chk(&ari2120x);
+    if (rc == ERR_ERR){
+        SET_ERR_RSPN("330");
+        return ERR_ERR;
+    }
+    */
+
+
 
     SYS_TREF;
-    return ERR_NONE;
 
-
-SYS_CATCH:
-
-    /* 결제원 에러 응답 조립하지 않음. */
-    ctx->kftc_err_set = 0;
-
-    SYS_TREF;
     return ERR_ERR;
 
 }
@@ -487,49 +547,100 @@ SYS_CATCH:
 static int d000_ext_msg_unformat(arn0012_ctx_t    *ctx)
 {
     int                 rc  = ERR_NONE;
-    exi0250x_t          exi0250x;
-    ixmsg0200a_t        ix0200a;
+    int                 proc_type;
+
+
+    exi4000x_t          exi4000x;
+    
 
     SYS_TRSF;
 
-    ix0200a = (ix0200a_t *) ctx->ext_recv_data;
-
-    /*------------------------------------------------------------------------ */
-    /* 거래구분 코드 변환                                                          */
-    /*------------------------------------------------------------------------ */
-    memset(&exi0250x, 0x00, sizeof(exi0250x_t));
-    exi0250x.in.conv_flag       = k;  
-    exi0250x.in.ext_recv_data   = ctx->ext_recv_data;
-
-    memcpy(exi0250x.in.appl_code,   IX_CODE,            LEN_APPL_CODE);
-    memcpy(exi0250x.in.tx_flag  ,   ix0200a->send_flag, LEN_EXI0250X_TX_FLAG);
-    memcpy(exi0250x.in.msg_type ,   ix0200a->msg_code,  LEN_MSG_TYPE);
-    memcpy(exi0250x.in.kftc_tx_code,ix0200a->appl_code, 3);
-
-    rc = ex_tran_code_conv(&exi0250x);
-    if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s arn0012: d00_tran_code_conv():"
-                             "거래코드 변환 ERROR : code/msg[%d:%s]"
-                             "[해결방안] IX담당자 CALL" ,
-                             __FILE__, sys_err_code, sys_err_msg());
-        return GOB_NRM;
+    if (EXPARM->host_comm_flag[0] != '1'){
+        return ERR_NONE;
     }
 
-    
+    /* 대외기관 전문으로 unformat    */
+    memset(&exi4000x, 0x00, sizeof(exi4000x_t));
 
-    memcpy(ctx->host_tx_code, exi0250x.out.tx_code, LEN_TX_CODE);
+    exi4000x.in.type            = EXI4000X_RES_MAPP;
+    exi4000x.in.msg_len         = LEN_EXMSG1200;  
+    exi4000x.in.base_len        = strlen(ctx->ext_send_data);
+    exi4000x.in.inp_conv_flag   = EXI4000X_NULL_CONV;
+
+    memcpy(exi4000x.in.msg      ,   EXMSG1200,          LEN_EXMSG1200);
+    memcpy(exi4000x.in.base_msg ,   ctx->ext_send_data, strlen(ctx->ext_send_data));
+    memcpy(exi4000x.in.appl_code,   AR_CODE           ,  LEN_APPL_CODE);
+    memcpy(exi4000x.in.tx_code  ,   EXMSG1200->tx_code, LEN_TX_CODE);
+
+    rc = ex_format(&exi4000x);
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s n000_ext_msg_unformat: ex_format ERROR ",
+                             __FILE__);
+        SET_ERR_RSPN;
+        return ERR_ERR;
+    }
+
+    /* 변환된 전문을 ext_send_data*/
+    memcpy(ctx->ext_send_data, exi4000x.out.msg, LEN_TX_CODE);
+
+    SYS_DSP(" exi4000x.out.msg [%.*s]", exi4000x.out.msg_len, exi4000x.out.msg);
+    /*------------------------------------------------------------------------ */
+    /* 1200전문을 넘는 경우                                                       */
+    /* 파라미터의 여분 8필드의 위치에 1200뒤 데이터를 붙여서 전송                          */
+    /*------------------------------------------------------------------------ */
+
+    if (utochknm(utotrim(EXPARM->fil8), strlen(utotrim(EXPARM->fil8))) == SYS_TRUE){
+        ctx->append_index = utoa2in(EXPARM->fil8, LEN_EXPARM_FIL8);
+        if (ctx->append_index != 0){
+            ctx->ext_send_data[ctx->append_index + ctx->append_size] = '\0';
+
+            // 기존KFTC에서 반은 1200전문 초과되는 전문을 그대로 사용하는 것으로 변경 
+            /* exmsg4000_t *exmsg4000;
+               exmsg4000 = (exmsg4000_t *) HOSTRECVDATA;
+
+               strncpy(&ctx->ext_send_data[ctx->append_index], exmsg4000->over1200, ctx->append_size);
+
+
+            */
+
+
+            SYS_DBG("SENDDATA to KFTC[%s]", ctx->ext_send_data);
+        }
+    }
+
 
     /*------------------------------------------------------------------------ */
-    SYS_DSP(" d000_ext_msg_unformat:host_tx_code [%s]", ctx->host_tx_code);
+    /* 주택청약순위 확인서 발급 / 조회 (tx_id = 304000)                               */
+    /* 동일한 매핑으로 변환하되 MGR_TYPE가 02 or 03인 경우 inq_rec_1까지만 전송           */
+    /*                    MGR_TYPE가 02 or 03인 아닌 경우 inq_rec_2까지만 전송       */
+    /* 전문 전송길이는 strlen 함수를 사용하는 null까지만 읽어서 간다.                      */
+    /*------------------------------------------------------------------------ */
+    if (strncmp(EXMSG1200->tx_code, "6344100092", 10) == 0){
+        if (strncmp( &ctx->ext_send_data[66], "02", 2) == 0 ||
+            strncmp( &ctx->ext_send_data[66], "03", 2) == 0 ||
+            strncmp( &ctx->ext_send_data[66], "05", 2) == 0 ){
+            ctx->ext_send_data[295] = 0x00;
+        }
+    }
     /*------------------------------------------------------------------------ */
 
+    rc = d200_err_conv(ctx);
+
+    SYS_TREF;
+    return rc; 
+
+SYS_CATCH:
     SYS_TREF;
 
     return ERR_ERR;
 
 
 }
-
+/* ------------------------------------------------------------------------------------------------------------ */
+static int d200_err_conv(arn0012_ctx_t      *ctx)
+{
+    int                 rc  = ERR_NONE;
+}
 /* ------------------------------------------------------------------------------------------------------------ */
 static int e000_jrn_create(arn0012_ctx_t   *ctx)
 {
@@ -662,9 +773,9 @@ static int f000_canc_jrn_update(arn0012_ctx_t    *ctx)
 
 SYS_CATCH:
 
-    ctx->ixi0220x.in.msg_code = '1';
-    ctx->ixi0220x.in.msg_code = '4';
-    memcpy(ctx->ixi0220x.in.rspn_code, "413", LEN_RSPN_CODE);
+    ctx->ari2120x.in.msg_code = '1';
+    ctx->ari2120x.in.msg_code = '4';
+    memcpy(ctx->ari2120x.in.rspn_code, "413", LEN_RSPN_CODE);
 
     SYS_TREF;
     return ERR_ERR;
@@ -860,9 +971,9 @@ static int h000_ix_dup_check(arn0012_ctx_t  *ctx)
         /* 중계센터로 "이중거래임"으로                                   */
         /* 응답코드를 set하여 전송한다 .                                 */
         /* ------------------------------------------------------- */
-        ctx->ixi0220x.in.msg_code   = '1';
-        ctx->ixi0220x.in.send_flag  = '4';
-        memcpy(ctx->ixi0220x.in.rspn_code, "309", LEN_RSPN_CODE);
+        ctx->ari2120x.in.msg_code   = '1';
+        ctx->ari2120x.in.send_flag  = '4';
+        memcpy(ctx->ari2120x.in.rspn_code, "309", LEN_RSPN_CODE);
         return ERR_ERR;
 
     /*------------------------------------------------------------------------ */
@@ -884,8 +995,8 @@ static int h000_ix_dup_check(arn0012_ctx_t  *ctx)
                              "중복검증 ERROR"
                              "[해결방안]업무담당자 CALL",
                              __FILE__);
-        ctx->ixi0220x.in.msg_code   = '1';
-        ctx->ixi0220x.in.send_flag  = '4';
+        ctx->ari2120x.in.msg_code   = '1';
+        ctx->ari2120x.in.send_flag  = '4';
         memcpy(ctx->ixi0200x.in.rspn_code,  "413", LEN_RSPN_CODE);
         return ERR_ERR;
     }
@@ -1020,9 +1131,9 @@ static int i000_tot_proc(arn0012_ctx_t  *ctx)
         /* JRN생성의 결과가 error 이면                                 */
         /* 금융결제원으로 에러전문을 SEND한다.                            */
         /* ------------------------------------------------------- */
-        ctx->ixi0220x.in.msg_code   = '1';
-        ctx->ixi0220x.in.send_flag  = '4';
-        memcpy(ctx->ixi0220x.in.rspn_code, "413", LEN_RSPN_CODE);
+        ctx->ari2120x.in.msg_code   = '1';
+        ctx->ari2120x.in.send_flag  = '4';
+        memcpy(ctx->ari2120x.in.rspn_code, "413", LEN_RSPN_CODE);
 
         return ERR_ERR;
     }
@@ -1097,9 +1208,9 @@ SYS_CATCH:
     /* ------------------------------------------------------- */
     /* 금융결제원으로 에러전문을 SEND한다.                            */
     /* ------------------------------------------------------- */
-    ctx->ixi0220x.in.msg_code       = '1';
-    ctx->ixi0220x.in.send_flag      = '4';
-    memcpy(ctx->ixi0220x.in.rspn_code, "413", LEN_RSPN_CODE);
+    ctx->ari2120x.in.msg_code       = '1';
+    ctx->ari2120x.in.send_flag      = '4';
+    memcpy(ctx->ari2120x.in.rspn_code, "413", LEN_RSPN_CODE);
 
     SYS_TREF;
     return ERR_ERR;
@@ -1118,8 +1229,8 @@ int static k000_ext_send_msg(arn0012_ctx_t *ctx)
     /* 결제원 에러응답 전문 조립                                                     */
     /* ----------------------------------------------------------------------- */
     if (ctx->kftc_err_set == 1){
-        ctx->ixi0220x.in.ext_recv_data = ctx->ext_recv_data;
-        ix_kftc_err_set(&ctx->ixi0220x);
+        ctx->ari2120x.in.ext_recv_data = ctx->ext_recv_data;
+        ix_kftc_err_set(&ctx->ari2120x);
     }
 
     len = ctx->ext_recv_len - 9;
