@@ -302,6 +302,72 @@ static int e000_ext_msg_send(nfn0012_ctx_t    *ctx)
     
     SYS_TRSF;
 
+    EXEC SQL 
+        SELECT TO_NUMBER(TRIM(MIR_CODE))
+          FROM EXCODE
+         WHERE maj_code = 'NF_ON_SESSION_FLAG';
+
+    SYS_DBG("NF_ON_SESSION_FLAG [%d]", nf_on_session_flag);
+
+    if (nf_on_session_flag != 9){
+        SYS_HSTERR(SYS_LN, 7777777, "BEFORE SESSION KEY EXCHANGE");
+        SYS_TREF;
+        return ERR_ERR;
+    }
+
+
+
+    rc = sys_tx_commit(TX_CHAINED);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s h000_ext_msg_send: sys_tx_commit ERROR", __FILE__);
+    }
+
+    /* 데이터가 없는 경우    */
+    if (EXTSENDDATA == NULL)
+        return ERR_NONE;
+
+    /* 대외기관 G/W에 호출하는 방식을 전달하기 위한 값을 set  */
+    SYSGWINFO->time_val     = SYSGWINFO_SAF_DETL_TIMEOUT;
+    SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_SAF;      /* SAF방식 호출       */
+    SYSGWINFO->rspn_flag    = SYSGWINFO_REPLY;              /* G/W로 부터의 응답   */
+    SYSGWINFO->msg_type     = SYSGWINFO_MSG_1500;           /* 전문 종류          */
+
+    SYS_DBG("FINAL EXTSEND LEN[%d]EXTSENDDATA[%.*s]", sysocbgs(ctx->cb, IDX_EXTSENDDATA), sysocbgs(ctx->cb. IDX_EXTSENDDATA), EXTSENDDATA);
+
+    /* 대외기관 데이터 전송  */
+    strcpy(SYSGWINFO->func_name,  "NFEXTC");
+    rc = sys_tpcall("SYEXTGW_NFC", ctx->cb, TPNOTRAN);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s NFN0011: h000_ext_msg_send() ERROR %d [해결방법]대외기관 G/W담당자 CALL", __FILE__, tperrno);
+        return ERR_ERR;
+    }
+
+    rc = z100_log_insert(ctx, (char *)EXTSENDDATA, sysocbgs(ctx->cb, IDX_EXTSENDDATA), 'I', '2');
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int f000_upd_jrn_proc(nfn0012_ctx_t      *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    nfi0002f_t          nfi0002f;
+
+    SYS_TRSF;
+
+    SYS_DBG("#1");
+    memset(&nfi0002f,   0x00, sizeof(nfi0002f_t));
+
+    
+    SYS_DBG("#2");
+    nfi0002f.in.exmsg1500 = EXMSG1500;
+
+    
+    SYS_DBG("#3");
     memcpy(nfi0002f.in.msg_no,  ctx->msg_no,    LEN_NFI0002F_MSG_NO);       /* msg_no     */
     memcpy(nfi0002f.in.corr_id, ctx->corr_id,   LEN_NFI0002F_CORR_ID);      /* corr_id    */
     nfi0002f.in.kti_flag[0] = ctx->kti_flag;
@@ -309,147 +375,80 @@ static int e000_ext_msg_send(nfn0012_ctx_t    *ctx)
 
     SYS_DBG("jrn insert ====================== msg_no[%s]corr_id[%s]", nfi0002f.in.msg_no, nfi0002f.in.corr_id);
 
+#if 1
     rc = nf_jrn_insupd(&nfi0002f);
 
     if (rc == ERR_ERR){
-        ex_syslog("[APPL_DM]%s :d000_jrn_insert(): nf_jrn_ins ERROR", __FILE__);
+        ex_syslog("[APPL_DM]%s :f000_upd_jrn_proc(): nf_jrn_ins ERROR", __FILE__);
         return ERR_ERR;
     }
 
+#endif 
+
     SYS_TREF;
     return ERR_NONE;
+ 
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int f000_upd_jrn_proc(nfn0012_ctx_t      *ctx)
+static int x000_nf_err_log(nfn0012_ctx_t    *ctx)
 {
-    int                 rc = ERR_NONE;
-
+    int                 rc  = ERR_NONE;
+    commbuff_t          dcb;
+    exmsg1500_t         errmsg;
 
     SYS_TRSF;
 
-/**
-    if (EXMSG1500->rspn_flag[0] == '0){
-        SYS_HSTERR(SYS_LN, 0000000, "NO RESPONSE MESSAGE");
-        return GOB_NRM;
-    }
-**/
 
+    /* DATA Copy  */
+    memcpy(&err_msg, EXMSG1500, sizeof(exmsg1500_t));
+    /* 에러 프로그램명    */
+    SET_1500ERROR_INFO(&errmsg);
 
-    rc = sysocbsi(ctx->cb, IDX_EXTSENDDATA, &HOSTRECVDATA[300], ctx->recv_len);
+    memset(&dcb,    0x00, sizeof(commbuff_t));
+    rc = sysocbdb(ctx->cb, &dcb);
     if (rc == ERR_ERR){
-        SYS_HSTERR(SYS_LN, SYS_GENERR, "COMMBUFF SET ERROR ");
-        return ERR_ERR;
-    }
-
-    SYS_DBG("EXTSENDDATA  [%d][%.*s]", sysocbgs(ctx->cb, IDX_EXTSENDDATA), sysocbgs(ctx->cb, IDX_EXTSENDDATA),  EXTSENDDATA);
-
-
-    /* 대외기관 G/W에 호출 하는 방식을 전달하기 위한 값을 set    */
-    SYSGWINFO->time_val     = SYSGWINFO_SAF_DETL_TIMEOUT;
-    SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_SAF;      /* SAF방식 호출     */
-    SYSGWINFO->rspn_flag    = SYSGWINFO_REPLY;              /* G/W로 부터 응답   */
-    SYSGWINFO->msg_type     = SYSGWINFO_MSG_1500;           /* 전문 종류        */
-
-    /* 대외기관 데이터 전송     */
-    strcpy(SYSGWINFO->func_name, "NFEXTC");
-    rc = sys_tpcall("SYEXTGW_NFC", ctx->cb, TPNOTRAN);
-
-    if (rc == ERR_ERR){
-        SYS_HSTERR(SYS_LN, 0265200, "GW SYEXTGW_NFC TPCALL ERROR");
-        ex_syslog(LOG_ERROR, "[APPL_DM]%s nfn0012: f000_upd_jrn_proc() ERROR %d [해결방안] 대외기관 G/W담당자 CALL", __FILE__, tperrno);
+        ex_syslog("[APPL_DM]%s :x000_nf_err_log(): COMMBUFF BACKUP ERROR[%d] [해결방안] 출동 담당자 CALL", __FILE__, tperrno);
         return ERR_ERR;
     }
 
 
-    rc = z100_log_insert(ctx,  EXTSENDDATA, ctx->recv_len, '0', '1');
+    rc = sysocbsi(ctx->cb, IDX_EXMSG1200, &errmsg, sizeof(exmsg1500_t));
     if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM]%s nfn0012: NF_LOG_ERROR[UNIX->KFTC]", __FILE__);
+        ex_syslog("[APPL_DM]%s :x000_nf_err_log(): COMMBUFF BACKUP ERROR[%d] [해결방안] 출동 담당자 CALL", __FILE__, tperrno);
+        sys_err_inti();
+        sysocbfb(&dcb);
+        return ERR_ERR;
     }
 
+    sysocbfb(&dcb);
     SYS_TREF;
 
     return ERR_NONE;
-
-SYS_CATCH:
-
-    return ERR_ERR;
-
 }
 
-/* ------------------------------------------------------------------------------------------------------------ */
-static int z000_error_proc(nfn0012_ctx_t    *ctx)
-{
-    
-    int                 rc = ERR_NONE;
-    int                 len = 0;
-    char                err_msg[20];
-
-    SYS_TRSF;
-
-    /* ------------------------------------------- */
-    SYS_DBG("z000_error_proc  : err_code [%d]",  sys_err_code());
-    SYS_DBG("z000_error_proc  : err_msg  [%s]",  sys_err_msg() );
-    /* ------------------------------------------- */
-
-    SET_1500ERROR_INFO(EXMSG1500);
-
-
-
-    SYS_DBG("EXMSG1500->tx_code [%.10s]", EXMSG1500->tx_code);
-    SYS_DBG("EXMSG1500->err_code [%.7s]", EXMSG1500->err_code);
-
-    SYSGWINFO->gw_rspn_send = SYSGWINFO_GW_REPLY_SEND;      /*  호스트에 응답 전송    */
-    SYSGWINFO->msg_type     = SYSGWINFO_MSG_1500;           /*  전문 타입 set       */
-
-    rc = sysocbsi(ctx->cb,  IDX_SYSIOUTQ, EXMSG1500, sizeof(exmsg1500_t));
-
-    if (rc == ERR_ERR){
-        SYS_HSTERR(SYS_LC, SYS_GENERR, "EXT MSG COMMBUFF ERROR");
-        return ERR_ERR;
-    }
-
-
-
-    SYS_TREF;
-
-    return ERR_NONE;
-
-}
 /* ------------------------------------------------------------------------------------------------------------ */
 static int z100_log_insert(nfn0012_ctx_t    *ctx, char *log_data, int size, char io_flag,   char sr_flag)
 {
 
     int                 rc = ERR_NONE;
-    nfi0003f_t          nfi0003f;
+    nfi3100f_t          nfi3100f;
     commbuff_t          *dcb;
-    char                *hp;
 
     SYS_TRSF;
 
     /* ------------------------------------------- */
-    SYS_DBG("z100_log_insert  : len [%d]io_flag[%c]sr_flag[%c]",  size, io_flag, sr_flag);
-    SYS_DBG("z100_log_insert  : msg [%d][%.*s]",  size, size, log_data );
+    SYS_DBG("z100_log_insert  : len [%d]",  size);
+    SYS_DBG("z100_log_insert  : msg [%s]",  log_data );
     /* ------------------------------------------- */
 
-    memset(&nfi0003f,   0x00, sizeof(nfi0003f_t));
-    memcpy(nfi0003f.in.van_cd,  "26", 2);
-    nfi0003f.in.io_flag     =  io_flag;
-    nfi0003f.in.sr_flag     =  sr_flag;
-    nfi0003f.in.log_len     =  size;
-    memcpy(nfi0003f.in.msg_no,      ctx->msg_no, LEN_NFI0002F_MSG_NO);
-    memcpy(nfi0003f.in.log_data,    log_data,    size);
-
-    /* TCP/IP 통신 헤더 정보    */
-    hp = sysocbgp(ctx->cb, IDX_TCPHEAD);
-    if (hp != NULL){
-        SYS_DBG("TCPHEAD LOG IS OK");
-        memcpy(nfi0003f.in.tcp_head,    hp, LEN_TCP_HEAD);
-        SYS_DBG("TCP HEAD [%s]", nfi0003f.in.tcp_head);
-    }
-
-
-    SYS_DBG("z100_log_insert: in.tcp_head[%d][%.*s]", strlen(nfi0003f.in.tcp_head), strlen(nfi0003f.in.tcp_head), nfi0003f.in.tcp_head);
+    memset(&nfi3100f,   0x00, sizeof(nfi3100f_t));
+    memcpy(nfi3100f.in.van_cd,  "26", 2);
+    nfi3100f.in.io_flag     =  io_flag;
+    nfi3100f.in.sr_flag     =  sr_flag;
+    nfi3100f.in.log_len     =  size;
+    memcpy(nfi3100f.in.msg_no,      ctx->msg_no, LEN_NFI0002F_MSG_NO);
+    memcpy(nfi3100f.in.log_data,    log_data,    size);
 
     memset(&dcb, 0x00, sizeof(commbuff_t));
     rc = sysocbdb(ctx->cb, &dcb);       /* ctx->cb dcb로 복사    */
@@ -460,7 +459,7 @@ static int z100_log_insert(nfn0012_ctx_t    *ctx, char *log_data, int size, char
     }
 
 
-    rc = sysocbsi(&dcb, IDX_HOSTRECVDATA,   &nfi0003f, sizeof(nfi0003f_t));
+    rc = sysocbsi(&dcb, IDX_HOSTRECVDATA,   &nfi3100f, sizeof(nfi3100f_t));
     if (rc == ERR_ERR) {
         ex_syslog(LOG_ERROR, "[APPL_DM]%s nfn0012: z100_log_insert() NFLOG ERROR sysocbsi log_type :%d", __FILE__, sr_flag);
         sys_err_init();
