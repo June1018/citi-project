@@ -500,7 +500,7 @@ static int z100_log_insert(nfn0020_ctx_t    *ctx, char *log_data, int size, char
     memset(&dcb, 0x00, sizeof(commbuff_t));
     rc = sysocbdb(ctx->cb, &dcb);       /* ctx->cb dcb로 복사    */
     if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM]%s nfn0020: z100_log_insert() NFLOG ERROR sysocbdb log_type :%d", __FILE__, sr_flag);
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s NFN0020: z100_log_insert() NFLOG ERROR sysocbdb log_type :%d", __FILE__, sr_flag);
         sys_err_init();
         return ERR_NONE;
     }
@@ -508,7 +508,7 @@ static int z100_log_insert(nfn0020_ctx_t    *ctx, char *log_data, int size, char
 
     rc = sysocbsi(&dcb, IDX_HOSTRECVDATA,   &nfi3100f, sizeof(nfi3100f_t));
     if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM]%s nfn0020: z100_log_insert() NFLOG ERROR sysocbsi log_type :%d", __FILE__, sr_flag);
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s NFN0020: z100_log_insert() NFLOG ERROR sysocbsi log_type :%d", __FILE__, sr_flag);
         sys_err_init();
         sysocbfb(&dcb);
         return ERR_NONE;
@@ -516,7 +516,7 @@ static int z100_log_insert(nfn0020_ctx_t    *ctx, char *log_data, int size, char
 
     rc = sys_tpcall("NFN3100F", &dcb, TPNOREPLY | TPNOTRAN);
     if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM]%s nfn0020: z100_log_insert() NFLOG ERROR sysocbsi log_type :%d", __FILE__, sr_flag);
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s NFN0020: z100_log_insert() NFLOG ERROR sysocbsi log_type :%d", __FILE__, sr_flag);
         sys_err_init();
     }
 
