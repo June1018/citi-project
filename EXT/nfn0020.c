@@ -343,7 +343,97 @@ static int e000_sel_jrn_proc(nfn0020_ctx_t    *ctx)
 }
 /*& working ......*/
 /* ------------------------------------------------------------------------------------------------------------ */
-static int m000_upd_jrn_proc(nfn0020_ctx_t      *ctx)
+static int k000_host_msg_send(nfn0020_ctx_t      *ctx)
+{
+
+    int                 rc = ERR_NONE;
+    char                send_len_str[ 4 + 1];
+
+    rc = sysocbsi(ctx->cb, IDX_HOSTSENDDATA, EXMSG1500,  sizeof(exmsg1500_t));
+    if (rc == ERR_ERR) {
+        SYS_HSTERR(SYS_LN,  SYS_GENERR, "COMMBUFF ERROR");
+        return ERR_ERR;
+    }
+
+    SYS_DBG("HOSTSENDDATA [%s][%.*s]", sysocbgs(ctx->cb, IDX_HOSTSENDDATA), sysocbgs(ctx->cb,   IDX_HOSTSENDDATA), HOSTSENDDATA );
+
+    /* 대외기관 G/W에 호출 하는 방식을 전달하기 위한 값을 set    */
+    SYSGWINFO->time_val     = SYSGWINFO_SAF_DETL_TIMEOUT;
+    SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_SAF;      /* SAF방식 호출     */
+    SYSGWINFO->rspn_flag    = SYSGWINFO_REPLY;              /* G/W로 부터 응답   */
+
+    /* rc = sys_tpcall("SYONHTSEND", ctx->cb, TPNOTRAN)   */
+
+#if define(SYS_DIRECT_SWAP)
+#include <exi6961x.h>
+    exi6961x_t  exi6961x;
+    memset(&exi6961x,   0x00, sizeof(exi6961x_t));
+    memcpy(exi6961x.in.appl_code,  "083", 3);
+    exi6961x.in.in_out_flag = '0';
+    sess_chg_proc(&exi6961x);
+
+    if (exi6961x.out.ch_flag[0] == '0'){
+        rc = sys_tpcall("SYONHTSEND",  ctx->cb, TPNOTRAN);
+    } else if (exi6961x.out.ch_flag[0] == '1'){
+        rc = sys_tpcall("SYONUATSEND",  ctx->cb, TPNOTRAN);
+    } else if (exi6961x.out.ch_flag[0] == '2'){
+        rc = sys_tpcall("SYONSIT2SEND",  ctx->cb, TPNOTRAN);
+    } else {
+        rc = sys_tpcall("SYONUAT2SEND",  ctx->cb, TPNOTRAN);
+    }
+#else 
+    rc = sys_tpcall("SYONHTSEND",  ctx->cb, TPNOTRAN);
+#endif 
+
+   
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s NFN0020 :k000_host_msg_send(): "
+                             " ERROR %d [해결방안] HOST G/W담당자 CALL", __FILE__, tperrno);
+        return ERR_ERR;
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+ 
+}
+/* ------------------------------------------------------------------------------------------------------------ */
+static int k100_kti_msg_send(nfn0020_ctx_t    *ctx)
+{
+
+    int                 rc  = ERR_NONE;
+
+    SYS_TRSF;
+
+    rc = sysocbsi(ctx->cb, IDX_HOSTSENDDATA, EXMSG1500,  sizeof(exmsg1500_t));
+    if (rc == ERR_ERR) {
+        SYS_HSTERR(SYS_LN,  SYS_GENERR, "COMMBUFF ERROR");
+        return ERR_ERR;
+    }
+
+    SYS_DBG("HOSTSENDDATA [%s][%.*s]", sysocbgs(ctx->cb, IDX_HOSTSENDDATA), sysocbgs(ctx->cb,   IDX_HOSTSENDDATA), HOSTSENDDATA );
+
+    /* 대외기관 G/W에 호출 하는 방식을 전달하기 위한 값을 set    */
+    SYSGWINFO->time_val     = SYSGWINFO_SAF_DETL_TIMEOUT;
+    SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_SAF;      /* SAF방식 호출     */
+    SYSGWINFO->rspn_flag    = SYSGWINFO_REPLY;              /* G/W로 부터 응답   */
+
+    rc = sys_tpcall("SYMQSEND_TAX", ctx->cb, TPNOTRAN);
+
+    if (rc =ERR_ERR ){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s NFN0020 :k100_kti_msg_send(): "
+                             " ERROR %d [해결방안] HOST G/W담당자 CALL", __FILE__, tperrno);
+        return ERR_ERR;
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int m000_upd_jrn_proc(nfn0020_ctx_t    *ctx)
 {
 
     int                 rc = ERR_NONE;
@@ -354,11 +444,14 @@ static int m000_upd_jrn_proc(nfn0020_ctx_t      *ctx)
     SYS_DBG("#1");
     memset(&nfi0002f,   0x00, sizeof(nfi0002f_t));
 
-    
     SYS_DBG("#2");
+    //EXMSG1500 = &nfi002f.in.exmsg1500;
     nfi0002f.in.exmsg1500 = EXMSG1500;
+    /* -------------------------------------------------------------------- */
+    SYS_DBG("nfjrn update msg ");
+    PRINT_EXMSG1500(EXMSG1500);
+    /* -------------------------------------------------------------------- */
 
-    
     SYS_DBG("#3");
     memcpy(nfi0002f.in.msg_no,  ctx->msg_no,    LEN_NFI0002F_MSG_NO);       /* msg_no     */
     memcpy(nfi0002f.in.corr_id, ctx->corr_id,   LEN_NFI0002F_CORR_ID);      /* corr_id    */
@@ -369,7 +462,6 @@ static int m000_upd_jrn_proc(nfn0020_ctx_t      *ctx)
 
 #if 1
     rc = nf_jrn_insupd(&nfi0002f);
-
     if (rc == ERR_ERR){
         ex_syslog("[APPL_DM]%s :m000_upd_jrn_proc(): nf_jrn_ins ERROR", __FILE__);
         return ERR_ERR;
@@ -379,44 +471,7 @@ static int m000_upd_jrn_proc(nfn0020_ctx_t      *ctx)
 
     SYS_TREF;
     return ERR_NONE;
- 
-}
 
-/* ------------------------------------------------------------------------------------------------------------ */
-static int x000_nf_err_log(nfn0020_ctx_t    *ctx)
-{
-    int                 rc  = ERR_NONE;
-    commbuff_t          dcb;
-    exmsg1500_t         errmsg;
-
-    SYS_TRSF;
-
-
-    /* DATA Copy  */
-    memcpy(&err_msg, EXMSG1500, sizeof(exmsg1500_t));
-    /* 에러 프로그램명    */
-    SET_1500ERROR_INFO(&errmsg);
-
-    memset(&dcb,    0x00, sizeof(commbuff_t));
-    rc = sysocbdb(ctx->cb, &dcb);
-    if (rc == ERR_ERR){
-        ex_syslog("[APPL_DM]%s :x000_nf_err_log(): COMMBUFF BACKUP ERROR[%d] [해결방안] 출동 담당자 CALL", __FILE__, tperrno);
-        return ERR_ERR;
-    }
-
-
-    rc = sysocbsi(ctx->cb, IDX_EXMSG1200, &errmsg, sizeof(exmsg1500_t));
-    if (rc == ERR_ERR){
-        ex_syslog("[APPL_DM]%s :x000_nf_err_log(): COMMBUFF BACKUP ERROR[%d] [해결방안] 출동 담당자 CALL", __FILE__, tperrno);
-        sys_err_inti();
-        sysocbfb(&dcb);
-        return ERR_ERR;
-    }
-
-    sysocbfb(&dcb);
-    SYS_TREF;
-
-    return ERR_NONE;
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
