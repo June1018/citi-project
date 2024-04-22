@@ -913,143 +913,34 @@ static int g000_saf_create(arn0012_ctx_t  *ctx)
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
-static int h000_ix_dup_check(arn0012_ctx_t  *ctx)
+static int h000_saf_update(arn0012_ctx_t  *ctx)
 {
     int                 rc  = ERR_NONE;
-    char                err_code[LEN_ERR_CODE + 1];
-    ixi0110x_t          ixi0110x;
-    exi0230x_t          exi0230x;
+    ari0290x_t          ari0290x;
 
+
+    /*------------------------------------------------------------------------ */
+    /* SAF응답여부  setting FLAG(FIL2)가 1이면 aro2900f call                       */
+    /* 자기앞,가계수표  사고 결번조회시 saf update                                     */
+    /*------------------------------------------------------------------------ */
     SYS_TRSF;
 
-    /*------------------------------------------------------------------------ */
-    SYS_DSP("h000_ix_dup_check : kftc_dup_chk[%s]",  EXPARM->kftc_dup_chk);
-    /*------------------------------------------------------------------------ */
-
-    if (EXPARM->kftc_dup_chk[0] != '1')
-        return ERR_NONE;
-
-
-    /*------------------------------------------------------------------------ */
-    /* 중복거래 검증                                                              */
-    /*------------------------------------------------------------------------ */
-    memset(&ixi0110x, 0x00, sizeof(ixi0110x_t));
-    ixi0110x.in.in_flag = 1;
-    memcpy(ixi0110x.in.tx_date, EXMSG1200->tx_date, LEN_IXI0110X_TX_DATE);
-    memcpy(ixi0110x.in.msg_no , EXMSG1200->msg_no , LEN_IXI0110X_MSG_NO );
-
-    rc = ix_dup_chk(&ixi0110x);
-
-    /*------------------------------------------------------------------------ */
-    SYS_DBG("h000_ix_dup_check : rc[%d]",  rc);
-    /*------------------------------------------------------------------------ */
-
-    switch(rc){
-    /*------------------------------------------------------------------------ */
-    /* 중복거래인 경우                                                            */
-    /* 중계센터로 "이중거래임"으로 답코드를 set하여 전송                                 */
-    /*------------------------------------------------------------------------ */
-    case ERR_NONE :
-        /* ------------------------------------------------------- */
-        /* 중계센터로 "이중거래임"으로                                   */
-        /* 응답코드를 set하여 전송한다 .                                 */
-        /* ------------------------------------------------------- */
-        ctx->ari2120x.in.msg_code   = '1';
-        ctx->ari2120x.in.send_flag  = '4';
-        memcpy(ctx->ari2120x.in.rspn_code, "309", LEN_RSPN_CODE);
-        return ERR_ERR;
-
-    /*------------------------------------------------------------------------ */
-    /* 중복거래가 아닌 경우                                                         */
-    /*------------------------------------------------------------------------ */
-    case SYS_DB_NOTFOUND:
-        break;
-
-    /*------------------------------------------------------------------------ */
-    /* 기타 DB ERROR인 경우                                                       */
-    /* 중계 센터로 "은행센터의 system장애 "로 set하여 전송                              */
-    /*------------------------------------------------------------------------ */
-    default:
-        /* ------------------------------------------------------- */
-        /* 중계 센터로 "은행센터의 system장애 "                          */
-        /* 로 set하여 전송                                            */
-        /* ------------------------------------------------------- */
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s h000_ix_dup_check()"
-                             "중복검증 ERROR"
-                             "[해결방안]업무담당자 CALL",
-                             __FILE__);
-        ctx->ari2120x.in.msg_code   = '1';
-        ctx->ari2120x.in.send_flag  = '4';
-        memcpy(ctx->ixi0200x.in.rspn_code,  "413", LEN_RSPN_CODE);
-        return ERR_ERR;
+    if (EXPARM->saf_upd_flag[0] != '1') {
+        return ERR_NONE; 
     }
 
-    SYS_TREF;
+    memset(&ari0290x, 0x00, sizeof(ari0290x_t));
+    ari0290x.in.exmsg1200 = &ctx->kti_recv_data;
+    ari0290x.in.armsgcomm = (armsgcomm_t *)ctx->ext_send_data; 
 
-    return ERR_NONE;
-
-
-}
-/* Decoupling ------------------------------------------------------------ */
-/* EI대표전문 채번 : 대외기관에 전송하는 전문일련번호 채번                             */
-/* TABLE        : IXMAX                                                    */
-/* 은행코드       : 053                                                      */
-/* 취급거래       : MAX(MAX_OUT_MSG_NO  + 1)                                 */
-/* 개설거래       : MAX(MAX_KFTC_MSG_NO + 1)                                 */
-/* Decoupling ------------------------------------------------------------ */
-static int h100_max_msg_no_proc(arn0012_ctx_t   *ctx)
-{
-    int                 rc = ERR_NONE;
-    ixi0120f_t          ixi0120f;
-
-    SYS_TRSF;
-    
-    
-    /*------------------------------------------------------------------------ */
-    SYS_DBG("h100_max_msg_no_proc START ");
-    /*------------------------------------------------------------------------ */
-
-    memset(&ixi0120f,   0x00, sizeof(ixi0120f_t));
-
-    ixi0120f.in.in_flag         = 1;    /* 0:취급업무,  1:개설업무  */
-    ixi0120f.in.max_flag        = 1;    /* 0:결번검증,  1:MAX채번  */
-    memcpy(ixi0120f.in.in_host_skn_chk, EXPARM->host_skn_chk,   1); /* 결번 검증 여부 */
-    memcpy(ixi0120f.in.in_kti_flag    , ctx->kti_flag       ,   1); /* 시스템구분 - 0:GCG, 1:ICG  */
-    ixi0120f.in.exmsg1200   = EXMSG1200;
-
-    rc = ix_skn_chk(&ixi0120f);
-
+    rc = ar_saf_update(&ari0290x);
     if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%.7s: ARN0012 : h000_saf_update() "
+                             " ar_saf_update ERROR", __FILE__ );
+    
+        SET_ERR_RSPN("189");
         return ERR_ERR;
     }
-
-    //
-    //sys_tx_commit(TX_CHAINED);
-    /*********************************************************************************/
-    /* IXI0120F.pc를 호출후 채번된 일련번호                                               */
-    /* ctx_ei_msg_no에 조립하여 관련 테이블 생성 및 갱신시 사용된다.                           */
-    /*********************************************************************************/
-    memcpy(ctx->ei_msg_no,  ixi0120f.out.out_max_ei_msg_no, LEN_IXI0120F_MAX_EI_MSG_NO);
-
-    SYS_DBG("ixi0120f CALL AFTER ");
-    SYS_DBG("ctx->ei_msg_no                 :[%s]", ctx->ei_msg_no);
-    SYS_DBG("ixi0120f.out.out_max_ei_msg_no :[%s]", ixi0120f.out.out_max_ei_msg_no);
-
-
-    /*  ---------------------------------------------------------------------- */
-    /* exmsg1200.our_msg_no 를 ctx->out_msg_no에 조립하여 임시보관                  */
-    /* exmsg1200.our_msg_no  금융결제원에 제공되는 번호이어서                          */
-    /* exmsg1200.our_msg_no에는 IXI0120F.pc에서 채번된 일련번호를                    */
-    /* 조립하고, ctx->ei_msg_no는 저널 생성시 our_msg_no에 조립하여                    */
-    /* IXJRN을 생성할떄 사용하려고 함.                                               */
-    /*  ---------------------------------------------------------------------- */
-
-
-
-
-    SYS_DBG("ixi0120f CALL Result ");
-    SYS_DBG("ctx->ei_msg_no                 :[%s]", ctx->ei_msg_no);
-    SYS_DBG("ixi0120f.out.out_max_ei_msg_no :[%s]", ixi0120f.out.out_max_ei_msg_no);
 
     SYS_TREF;
 
@@ -1060,64 +951,78 @@ static int h100_max_msg_no_proc(arn0012_ctx_t   *ctx)
 /* ------------------------------------------------------------------------------------------------------------ */
 static int i000_tot_proc(arn0012_ctx_t  *ctx)
 {
-    int                 rc = ERR_NONE;
-    ixi0140x_t          ixi0140x;
 
+    int                 rc  = ERR_NONE;
+    ari2720f_t          ari2720f;
+    ari2740f_t          ari2740f;
+    ari2750f_t          ari2750f;
+    ari2810f_t          ari2810f;
+    ari2820f_t          ari2820f;
+    ari2840f_t          ari2840f;
+
+    /*------------------------------------------------------------------------ */
+    /* 거래집계처리여부 FLAG1이 2/3/4/5/6이면 aro2720f/aro2730f/                     */
+    /*------------------------------------------------------------------------ */
     SYS_TRSF;
 
-    /*------------------------------------------------------------------------ */
-    SYS_DSP("i000_tot_proc : host_send_jrn_make[%s]",  EXPARM->host_send_jrn_make);
-    /*------------------------------------------------------------------------ */
-
-    if (EXPARM->host_send_jrn_make[0] != '2')
-        return ERR_NONE;
-
-
-    /* ----------------------------------------------------------------------- */
-    /* JRN 생성                                                                 */
-    /* ----------------------------------------------------------------------- */
-    memset(&ixi0140f,   0x00, sizeof(ixi0140f));
-    ixi0140f.in.exmsg1200       = EXMSG1200;
-    ixi0140f.in.ext_send_data   = ctx->ext_recv_data;
-
-    /*
-     *
-    */
-    memcpy(ixi0140f.in.in_new_flag  ,       "NEW",       , 3); /* NEW JRN 생성, INQ중복검증   */ 
-    memcpy(ixi0140f.in.in_comm_flag ,       "R",         , 1); /* S취급거래    , R개설거래     */
-    memcpy(ixi0140f.in.ei_msg_no    ,    ctx->ei_msg_no  ,10); /* 채번된 EI관리 일련번호        */
-    memcpy(ixi0140f.in.in_orig_ei_msg_no    ,"0000000000",10); /* 원거래 EI관리 일련번호        */
-    memcpy(ixi0140f.in.in_orig_proc_msg_no  ,"0000000000",10); /* 원거래 당행관리 일련번호       */
-
-    /* 결번검증하지 않는 거래는 EI_MSG_NO는 0을 10개 채운다.  */
-    if (EXPARM->host_skn_chk[0] != '1'){
-        memcpy(ixi0140f.in.in_ei_msg_no,    "0000000000" ,10); /* EI대표전문번호              */
+    if (EXPARM->tot_pod_flag_1[0] == '2'){
+        memset(&ari2720f,   0x00,   sizeof(ari2720f_t));
+        if (EXPARM->host_comm_flag[0] == '0'){
+            ari2720f.in.func_code   = ARI2720F_EXTMSG_INPUT;
+            ari2720f.in.armsgcomm   = (armsgcomm_t *)ctx->ext_send_data; 
+        }
+        else{
+            ari2720f.in.func_code   = ARI2720F_HOTMSG1200_INPUT;
+            ari2720f.in.exmsg1200   = &ctx->kti_recv_data;
+        }
+        rc = ar_tot2_proc(&ari2720f);
+    }
+    else if (EXPARM->tot_pod_flag_1[0] == '4'){
+        /* 지로출금 집계   */
+        memset(&ari2740f,   0x00,   sizeof(ari2740f_t));
+        memcpy(ari2740f.in.kti_flag,    "1",  ARI2740F_KTI_FLAG);
+        ari2740f.in.exmsg1200 = &ctx->kti_recv_data;
+        rc = ar_tot4_proc(&ari2740f);
+    }
+    else if (EXPARM->tot_pod_flag_1[0] == '5'){
+        /* 공공요금 출금 집계   */
+        memset(&ari2750f,   0x00,   sizeof(ari2750f_t));
+        ari2750f.in.exmsg1200 = &ctx->kti_recv_data;
+        rc = ar_tot5_proc(&ari2750f);
     }
 
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%.7s: ARN0012 : s000_tot_proc() "
+                             " ar_tot_%c proc ERROR", __FILE__, EXPARM->tot_pod_flag_1[0]);
+    
+        SET_ERR_RSPN("189");
+        return ERR_ERR;
+    }
 
-    memcpy(ixi0140f.in.in_kti_flag, ctx->kti_flag,  LEN_IXI0140F_KTI_FLAG); /* 시스템구분 0:GCG, 1:ICG  */
+    /*------------------------------------------------------------------------ */
+    /* 거래집계처리여부 FLAG2가 4/5/7이면 aro2810f/aro2820f/aro2840f/                */
+    /*------------------------------------------------------------------------ */
+    if (EXPARM->tot_pod_flag_2[0] == '4'){                     /* 지로출금 집계   */
+        memset(&ari2810f,   0x00,   sizeof(ari2810f_t));    
+        ari2810f.in.armsg = (armsg0700a_t *)ctx->ext_send_data;
+        rc = ar_tot4_700(&ari2810f);
+    }
+    else if (EXPARM->tot_pod_flag_2[0] == '5'){                /* 공공요금 집계   */
+        memset(&ari2820f,   0x00,   sizeof(ari2820f_t));    
+        ari2820f.in.armsg = (armsg0700a_t *)ctx->ext_send_data;
+        rc = ar_tot5_700(&ari2820f);
+    }
+    else if (EXPARM->tot_pod_flag_2[0] == '7'){                /* 전화요금 집계   */
+        memset(&ari2840f,   0x00,   sizeof(ari2840f_t));    
+        ari2840f.in.armsg = (armsg0700a_t *)ctx->ext_send_data;
+        rc = ar_tot7_700(&ari2840f);
+    }
 
-    rc = ix_jrn_ins(&ixi0140f);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%.7s: ARN0012 : s000_tot_proc() "
+                             " ar_tot_%c proc ERROR", __FILE__, EXPARM->tot_pod_flag_2[0]);
 
-    switch(rc){
-    case ERR_NONE:
-        break;
-    case TX_DUP:
-        return GOB_ERR;
-    default:
-
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s i000_tot_proc()"
-                             "IXJRN INSERT ERROR"
-                             "[해결방안]ORACLE 담당자 CALL",
-                             __FILE__);
-        /* ------------------------------------------------------- */
-        /* JRN생성의 결과가 error 이면                                 */
-        /* 금융결제원으로 에러전문을 SEND한다.                            */
-        /* ------------------------------------------------------- */
-        ctx->ari2120x.in.msg_code   = '1';
-        ctx->ari2120x.in.send_flag  = '4';
-        memcpy(ctx->ari2120x.in.rspn_code, "413", LEN_RSPN_CODE);
-
+        SET_ERR_RSPN("189");
         return ERR_ERR;
     }
 
