@@ -1377,6 +1377,4 @@ static int utoiconv(char *fcode, char *tcode, char *in, size_t in_len, char *out
 
 }
 
-
-
 /* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
