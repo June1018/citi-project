@@ -724,10 +724,12 @@ static int e000_jrn_create(arn0012_ctx_t   *ctx)
     ari2540f_t          ari2540f;
     ari2550f_t          ari2550f;
     armsgcomm_t         *armsgcomm;
+    hcmihead_t          hcmihead;
 
     SYS_TRSF;
     /* EXPARM host send jrn make가 2,3,4인겨우 만 처리 
-       2:사고수표저널처리 3:지로 저널, 4:공공요금 저널    */
+       2:사고수표저널처리 3:지로 저널, 4:공공요금 저널   
+    */
 
     if ((EXPARM->host_send_jrn_make[0] != '2') &&
         (EXPARM->host_send_jrn_make[0] != '3') &&
@@ -759,12 +761,13 @@ static int e000_jrn_create(arn0012_ctx_t   *ctx)
         ari2540f.in.sys_type  = '1';
         ari2540f.in.armsg     = ctx->ext_send_data;
         ari2540f.in.exmsg1200 = EXMSG1200;
-        rc = ar_jrn3_create(&ari2534f);
+        rc = ar_jrn4_create(&ari2534f);
     } 
 
     if (rc == ERR_ERR){
         ex_syslog(LOG_ERROR, "[APPL_DM]%.7s: ARN0012 : e000_jrn_create() "
                              " ar_jrn%c create ERROR", __FILE__, EXPARM->host_send_jrn_make[0]);
+    
         SET_ERR_RSPN("189");
         return ERR_ERR;
     }
@@ -773,8 +776,25 @@ static int e000_jrn_create(arn0012_ctx_t   *ctx)
     /* arjrnkti 저널 생성                             */
     /* -------------------------------------------- */
     memset(&ari2550f,   0x00, sizeof(ari2550f_t));
-    
 
+    //TCP_HEAD의 queue_name의 corr_id
+    hcmihead = (hcmihead_t *)TCPHEAD;
+
+    SYS_DBG("hcmihead->queue_name[%s]", hcmihead->queue_name);
+
+    ar_data_convert(ari2550f.in.proc_date,  armsgcomm->msg_send_data);
+    //
+    memcpy(ari2550f.in.kftc_msg_no,     &EXMSG1200->msg_no[1],  LEN_ARI2550F_KFTC_MSG_NO);
+    memcpy(ari2550f.in.corr_id,         hcmihead->queue_name ,  LEN_ARI2550F_CORR_ID);
+    rc = ar_jrnkti_create(&ari2550f);
+
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%.7s: ARN0012 : e000_jrn_create() "
+                             " ar_jrnkti create ERROR", __FILE__);
+    
+        SET_ERR_RSPN("189");
+        return ERR_ERR;
+    }
 
     SYS_TREF;
 
@@ -787,95 +807,46 @@ static int e000_jrn_create(arn0012_ctx_t   *ctx)
 static int f000_canc_jrn_update(arn0012_ctx_t    *ctx)
 {
     int                 rc  = ERR_NONE;
-    ixi1040x_t          ixi1040x;
-    exi4000x_t          exi4000x;
-    exmsg1200_t         exmsg1200;
+    ari2610f_t          ari2610f;
+    ari2620f_t          ari2620f;
+    armsgcomm_t         *armsgcomm;
 
+    /* 취소거래 시 jrn update    */
     SYS_TRSF;
 
-    /*------------------------------------------------------------------------ */
-    SYS_DSP(" f000_canc_jrn_update: host_msg_make [%s]", EXPARM->host_msg_make);
-    /*------------------------------------------------------------------------ */
+    if ((EXPARM->canc_jrn_upd[0] != '3') &&         /* 지로 취소  */
+        (EXPARM->canc_jrn_upd[0] != '4')){          /* 공공 취소  */
+        return ERR_NONE; 
+    }
 
-    if (EXPARM->host_msg_make[0] != '1')
-        return ERR_NONE;
+    armsgcomm = (armsgcomm_t *)ctx->ext_send_data;
 
-    /*------------------------------------------------------------------------ */
-    /* 1200전문 초기화                                                           */
-    /*------------------------------------------------------------------------ */
-    memset(&ixi1040x, 0x00, sizeof(ixi1040x_t));
-    ixi1040x.in.exmsg1200   = &exmsg1200;
-    ix_ex1200_init(&ixi1040x);
+    if (EXPARM->canc_jrn_upd[0] == '3'){
+        memset(&ari2610f,   0x00,   sizeof(ari2610f_t));
+        memcpy(ari2610f.in.kftc_send_data,  armsgcomm->msg_send_data, LEN_ARMSGCOMM_MSG_SEND_DATE);
+        ari2610f.in.exmsg1200 = EXMSG1200;
 
-    /*------------------------------------------------------------------------ */
-    /* 호스트전문으로 FORMAT                                                      */
-    /*------------------------------------------------------------------------ */
-    memset(&exi4000x,   0x00,   sizeof(exi4000x_t));
-    exi4000x.in.type            = EXI4000X_REQ_MAPP;
-    exi4000x.in.inp_conv_flag   = EXI4000X_NULL_CONV;
-    exi4000x.in.out_conv_flag   = EXI4000X_NULL_CONV;
-    exi4000x.in.base_len        = LEN_EXMSG1200;
-    exi4000x.in.msg_len         = ctx->ext_recv_len;
+        rc = ar_jrn3_update(&ari2610f);
+    }
+    else if (EXPARM->canc_jrn_upd[0] == '4'){
+        memset(&ari2620f,   0x00,   sizeof(ari2620f_t));
+        memcpy(ari2620f.in.kftc_send_data,  armsgcomm->msg_send_data, LEN_ARMSGCOMM_MSG_SEND_DATE);
+        ari2620f.in.exmsg1200 = EXMSG1200;
 
-    memcpy(exi4000x.in.base_msg,    &exmsg1200,         LEN_EXMSG1200);
-    memcpy(exi4000x.in.msg,         ctx->ext_recv_data, exi4000x.in.msg_len);
-    memcpy(exi4000x.in.appl_code,   IX_CODE,            LEN_APPL_CODE);
-    memcpy(exi4000x.in.tx_code,     EXPARM->tx_code,    LEN_TX_CODE);    
+        rc = ar_jrn4_update(&ari2620f);
+    } 
 
-    rc = ex_format(&exi4000x);
     if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_canc_jrn_update()"
-                             "FORMAT ERROR: host_tx_code [%s]"
-                             "[해결방안]업무담당자 CALL",
-                             __FILE__, ctx->host_tx_code);
-        goto SYS_CATCH;
+        ex_syslog(LOG_ERROR, "[APPL_DM]%.7s: ARN0012 : f000_canc_jrn_update() "
+                             " ar_jrn%c update ERROR", __FILE__, EXPARM->canc_jrn_upd[0] );
+    
+        SET_ERR_RSPN("189");
+        return ERR_ERR;
     }
-
-    if (exi4000x.out.msg_len <= 0){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_canc_jrn_update()"
-                             "FORMAT ERROR: host_tx_code [%s]"
-                             "[해결방안]업무담당자 CALL",
-                             __FILE__, ctx->host_tx_code);
-        goto SYS_CATCH;
-    }
-
-    /* 전문변환 데이터 1200 bytes */
-    memcpy(&exmsg1200, exi4000x.out.msg, LEN_EXMSG1200);
-
-    /*------------------------------------------------------------------------ */
-    /* 변환된전문을 COMMBUFF에 set                                                 */
-    /*------------------------------------------------------------------------ */
-    rc = sysocbsi(ctx->cb, IDX_EXMSG1200,   &exmsg1200, LEN_EXMSG1200);
-    if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s f000_canc_jrn_update()"
-                             "COMMBUFF(EXMSG1200) SET ERROR"
-                             "[해결방안]업무담당자 CALL",
-                             __FILE__);
-        goto SYS_CATCH;
-    }
-
-    memcpy(EXMSG1200->tx_code, ctx->host_tx_code, LEN_TX_CODE);
-    utodate1(EXMSG1200->tx_date);
-    utotime1(EXMSG1200->tx_time);
-
-#ifdef _SIT_DBG
-    /* ------------------------------------------------------------------------- */
-    PRINT_EXMSG1200(EXMSG1200);
-    PRINT_EXMSG1200_2(EXMSG1200);
-    /* ------------------------------------------------------------------------- */
-#endif
 
     SYS_TREF;
+
     return ERR_NONE;
-
-SYS_CATCH:
-
-    ctx->ari2120x.in.msg_code = '1';
-    ctx->ari2120x.in.msg_code = '4';
-    memcpy(ctx->ari2120x.in.rspn_code, "413", LEN_RSPN_CODE);
-
-    SYS_TREF;
-    return ERR_ERR;
 
 }
 
