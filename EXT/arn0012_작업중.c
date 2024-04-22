@@ -1307,7 +1307,76 @@ static int z100_log_insert(arn0012_ctx_t    *ctx, char *log_data, int size, char
 
     return ERR_NONE;
 
+
 }
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+/* function             utoiconv(char *fcode, char *tcode, char *in, size_t in_len, char *out, size_t   out_len)*/
+/* brief        : 코드변환                                                                                        */
+/*                                                                                                              */
+/*                                                                                                              */
+/*                                                                                                              */
+/*                                                                                                              */
+/*                                                                                                              */
+/*                                                                                                              */
+/*                                                                                                              */
+/*                                                                                                              */
+/*                                                                                                              */
+/* ------------------------------------------------------------------------------------------------------------ */
+static int utoiconv(char *fcode, char *tcode, char *in, size_t in_len, char *out, size_t  out_len)
+{
+
+    int                 rc  = 0;
+    iconv_t             cd  = {0};
+    char              *in2  = in;
+    char              *out2 = out;
+
+    if (in == 0x00){
+        SYS_DBG("in is null");
+        return -1;
+    }
+
+    if (out == 0x00){
+        SYS_DBG("out is null");
+        return -1;
+    }
+
+    if (in_len < 1){
+        SYS_DBG("in_len[%d] is not vaild", in_len);
+        return -1;
+    }
+
+    if (out_len < 1){
+        SYS_DBG("out_len[%d] is not vaild", out_len);
+        return -1;
+    }
+
+    cd = iconv_open(tcode, fcode);
+    if ((int)cd < 0){
+        SYS_DBG("icov_open failed errorno [%d][%s]", errno, strerror(errno));
+        return -1;
+    }
+
+    cd = iconv(cd ,&in_len, &out, &out_len);
+    if ((int)cd < 0){
+        SYS_DBG("icov_open failed errorno [%d][%s]", errno, strerror(errno));
+        rc = iconv_close(cd);
+        return -1;
+    }
+
+    rc = iconv_close(cd);
+    if ((int)cd < 0){
+        SYS_DBG("icov_open failed errorno [%d][%s]", errno, strerror(errno));
+        return -1;
+    }
+
+    /* UTF-8 변환 길이  */
+    rc = out2 - out;
+    return rc;
+
+}
+
 
 
 /* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
