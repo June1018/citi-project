@@ -1035,95 +1035,89 @@ static int i000_tot_proc(arn0012_ctx_t  *ctx)
 /* ------------------------------------------------------------------------------------------------------------ */
 static int j000_net_mgr_proc(arn0012_ctx_t  *ctx)
 {
+
     int                 rc  = ERR_NONE;
-    ixi1060f_t          ixi1060f;
+    armsg0800a_t        *armsg0800a;
+    exi0240f_t          exi0240f;
 
     SYS_TRSF;
 
-    /*------------------------------------------------------------------------ */
-    SYS_DSP("j000_net_mgr_proc : host_send_jrn_make[%s]",  EXPARM->host_send_jrn_make);
-    /*------------------------------------------------------------------------ */    
-
-    if (EXPARM->host_send_jrn_make[0] != '2'){
-
-        /* ----------------------------------------------------------------------- */
-        SYS_DSP("IXHSAF insert skip" );
-        /* ----------------------------------------------------------------------- */
-        
+    if (EXPARM->kftc_mgr_flag[0] != '1'){
         return ERR_NONE;
-
     }
 
+    armsg0800a = (armsg0800a_t *)ctx->ext_send_data;
 
-    /* ----------------------------------------------------------------------- */
-    SYS_DSP("j000_net_mgr_proc : host_send_jrn_make[%s]",  EXPARM->host_send_jrn_make);
-    /* ----------------------------------------------------------------------- */
+    if (memcmp(armsg0800a->rspn_code,   "000", 3) != 0){
+        return ERR_NONE;
+    }
 
-    /* ----------------------------------------------------------------------- */
-    /* HOST미전송  생성처리                                                        */
-    /* ----------------------------------------------------------------------- */
-    memset(&ixi1060f,   0x00, sizeof(ixi1060f_t));
-    ixi1060f.in.exmsg1200       = EXMSG1200;
+    memset(&exi0240f,   0x00,   sizeof(exi0240f_t));
 
-    /*
-     *
-    */
-    memcpy(ixi1060f.in.ei_msg_no    ,    ctx->ei_msg_no  ,10); /* 채번된 EI관리 일련번호        */
-    memcpy(ixi1060f.in.in_kti_flag  ,    ctx->kti_flag   , LEN_IXI1060F_KTI_FLAG ); /* 시스템구분 0:GCG, 1:ICG  */
+    /* 053(kti) 기관코드에 대해서 027과 동일하게 상태  update처리    */
+    exi0240f.in.upd_verf_flag = 'U';
+    memcpy(exi0240f.in.inst_no      ,    "053"  ,   LEN_EXI0240F_INST_CODE); 
+    memcpy(exi0240f.in.appl_code    ,   AR_CODE ,   LEN_EXI0240F_APPL_CODE);
+    memcpy(exi0240f.in.sub_appl_code,     "00"  ,   LEN_EXI0240F_SUB_APPL_CODE);
+    memcpy(exi0240f.in.tx_code      , EXMSG1200->tx_code, LEN_EXMSG1200_TX_CODE);
+    ar_date_convert(exi0240f.in.tx_date,    armsg0800a->msg_send_date);
 
-    SYS_TRY(ix_host_saf_prod_prod(&ixi1060f));
+    rc = ex_net_upd_verf(&exi0240f);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%.7s: ARN0012 : t000_net_mgr_proc() "
+                             " ex_net_upd_verf ERROR", __FILE__ );
+        return GOB_NRM;
+    }
 
-#ifdef _DEBUG
-    /*------------------------------------------------------------------------ */
-    SYS_DBG("================================================================");
-    SYS_DBG("      j000_net_mgr_proc : EXMSG1200                         ");
-    SYS_DBG("================================================================");
-    PRINT_EXMSG1200(EXMSG1200);
-    PRINT_EXMSG1200_2(EXMSG1200);
-    /*------------------------------------------------------------------------ */
-#endif
+    memcpy(exi0240f.in.inst_no,     "099",      LEN_EXI0240F_INST_CODE);
+    
+    rc = ex_net_upd_verf(&exi0240f);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%.7s: ARN0012 : t000_net_mgr_proc() "
+                             " ex_net_upd_verf ERROR", __FILE__ );
+        return GOB_NRM;
+    }
 
     SYS_TREF;
 
     return ERR_NONE;
 
-SYS_CATCH:
-
-    ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0040: j000_net_mgr_proc()"
-                         "SAF INSERT ERROR"
-                         "[해결방안]ORACLE 담당자 CALL",
-                          __FILE__);
-    /* ------------------------------------------------------- */
-    /* 금융결제원으로 에러전문을 SEND한다.                            */
-    /* ------------------------------------------------------- */
-    ctx->ari2120x.in.msg_code       = '1';
-    ctx->ari2120x.in.send_flag      = '4';
-    memcpy(ctx->ari2120x.in.rspn_code, "413", LEN_RSPN_CODE);
-
-    SYS_TREF;
-    return ERR_ERR;
-
 }
 /* ------------------------------------------------------------------------------------------------------------ */
 int static k000_ext_send_msg(arn0012_ctx_t *ctx)
 {
+    
     int                 rc  = ERR_NONE;
-    int                 len;
-    char                ext_gw_svc_name[15];
+    armsg0201q_t        armsg0201q;
+    char                cust_name[LEN_ARMSG0201Q_CUST_NAME + 1];
 
     SYS_TRSF;
 
     /* ----------------------------------------------------------------------- */
-    /* 결제원 에러응답 전문 조립                                                     */
+    /* 대외기관통신전문 commit여부 FLAG가 1이면 commit한다.                            */
     /* ----------------------------------------------------------------------- */
-    if (ctx->kftc_err_set == 1){
-        ctx->ari2120x.in.ext_recv_data = ctx->ext_recv_data;
-        ix_kftc_err_set(&ctx->ari2120x);
+    
+    if (EXPARM->kftc_send_comi[0] == '1'){
+        rc = sys_tx_commit(TX_CHAINED);
+
+        if (rc == ERR_ERR){
+            ex_syslog(LOG_ERROR, "[APPL_DM]%.7s: u000_ext_send_msg()  sys_tx_commit ERROR", 
+                                  __FILE__ );
+            SET_ERR_RSPN("189");
+            return ERR_ERR;
+        }
     }
 
+    /* 대외기관 전송데이터 길이 검증     
     len = ctx->ext_recv_len - 9;
 
-    /* 대외기관 전송데이터 길이 검증     */
+
+
+
+
+
+
+
     if (len <= 0){
         ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0020: k000_ext_send_msg()"
                              "EXT GW LEN ERROR [len=%d]"
@@ -1131,51 +1125,189 @@ int static k000_ext_send_msg(arn0012_ctx_t *ctx)
                              __FILE__, len);
         return GOB_ERR;
     }
+    
+    */
 
     /* 대외기관 G/W에 호출하는 방식을 전달하기 위한 값을 set */
-    strcpy(SYSGWINFO->func_name, "X25IXIO");
-    SYSGWINFO->msg_type     = SYSGWINFO_MSG_ETC;        /* 전문종류 방식  */
+    strcpy(SYSGWINFO->func_name, TCPSEND_KFTC);
+    SYSGWINFO->time_val     = SYSGWINFO_SAF_DFLT_TIMEOUT;
     SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_SAF;  /* SAF 방식호출  */
     SYSGWINFO->rspn_flag    = SYSGWINFO_REPLY;          /* G/W로 부터의 응답   */
+    SYSGWINFO->msg_type     = SYSGWINFO_MSG_ETC;        /* 전문종류 방식  */    
 
-    SYSGWINFO->time_val     = utoa2ln(EXPARM->time_val, LEN_EXPARM_TIME_VAL);
-    if (SYSGWINFO->time_val <= 0)                       /* SAF방식 타임 아웃   */
-        SYSGWINFO->time_val = SYSGWINFO_SAF_DFLT_TIMEOUT;
-
-#ifdef _SIT_DBG
-    PRINT_IX_KFTC_DEBUG(ctx->ext_recv_data);
-#endif
-
-    /* output queue 에 데이터 저장  */
-    rc = sysocbsi(ctx->cb, IDX_EXTSENDDATA, &ctx->ext_recv_data[9], len);
+    /* transaction_id 9자리 빼야 함     */
+    sysocbsi(ctx->cb, IDX_EXTSENDDATA, &ctx->ext_send_data[9], strlen(&ctx->ext_send_data[9]));
     if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0040: k000_ext_send_msg()"
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s ARN0012: u000_ext_send_msg()"
                         "COMMBUFF(EXTSENDDATA) SET ERROR"
                         "[해결방안]시스템 담당자 CALL",
                         __FILE__);
-        return GOB_ERR;
+        return ERR_ERR;
     }
 
+#ifdef _DEBUG
+    PRINT_ARS_KFTC_DEBUG(ctx->ext_send_data);
+#endif
+
+    SYS_DBG("tx_code [%s]fil10[%s]", EXPARM->tx_code, EXPARM->fil10);
 
     /* 대외기관 데이터 전송   */
-    rc = sys_tpcall("SYEXTGW_IX", ctx->cb, TPNOTRAN);
-    
-    strcpy(ext_gw_svc_name, "SYEXTGW_IX");
-    if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s IXI0040: k000_ext_send_msg()"
-                        "%s 서비스 호출 ERROR [%d:%d]: func_name[%s]"
-                        "[해결방안]대외기관 G/W 담당자 CALL",
-                        __FILE__, ext_gw_svc_name, tperrno, sys_err_code(),
-                        SYSGWINFO->func_name);
-        return GOB_ERR;
+    if (EXPARM->fil10[0] == '1'){
+        strcpy(SYSGWINFO->func_name, "TCPKABC");
+        rc = sys_tpcall("SYEXTGW_KAB", ctx->cb, TPNOTRAN);
+    }else{
+        rc = sys_tpcall("SYEXTGW_ARS", ctx->cb, TPNOTRAN);
     }
 
-    /* 결제원 송신 전문 로깅 */
-    b000_init_proc(ctx, KFTC_SEND_LOG);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s ARN0000: u000_ext_send_msg()"
+                        "%s 서비스 호출 ERROR [%d][해결방안]대외기관 G/W 담당자 CALL",
+                        __FILE__, tperrno);
+        return ERR_ERR;
+    }
+
+    /* aruklog insert */
+    rc = z100_log_insert(ctx, EXTSENDDATA, sysocbgs(ctx->cb, IDX_EXTSENDDATA), 2 + ctx->log_type_add);
+     if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s ARN0012: u000_ext_send_msg()AR LOG ERROR :log_type[%d][해결방안]담당자 CALL",
+                        __FILE__ ,  2);
+        sys_err_init();
+    }
 
     SYS_TREF;
 
     return ERR_NONE;
 
 }
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int z000_err_ext_send(arn0012_ctx_t    *ctx)
+{
+    
+    int                 rc = ERR_NONE;
+    armsgcomm_t         *armsgcomm;
+
+    SYS_TRSF;
+
+    rc = sys_tx_rollback(TX_CHAINED);
+
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s z000_err_ext_send: sys_tx_rollback ERROR",
+                            __FILE__);
+        return ERR_ERR;
+    }
+
+
+    rc = sysocbsi(ctx->cb, IDX_EXTSENDDATA, &ctx->ext_send_data[9], strlen(&ctx->ext_send_data[9]));
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s ARN0012: z000_err_ext_send()"
+                             "COMMBUFF SET ERROR [해결방안]시스템 담당자 call",
+                             __FILE__);
+        return ERR_ERR;
+    }
+
+#ifdef  _DEBUG 
+    PRINT_ARS_KFTC_DEBUG(ctx->ext_send_data);
+#endif
+
+    /* 대외기관 G/W에서 호출하는 방식을 전달하기 위한 값을 set  */
+    /* TCP/IP ARS 전환                                */
+    strcpy(SYSGWINFO->func_name,    TCPSEND_KFTC);
+    SYSGWINFO->time_val = SYSGWINFO_SAF_DFLT_TIMEOUT;
+    SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_SAF;  /* SAF 방식호출  */
+    SYSGWINFO->rspn_flag    = SYSGWINFO_REPLY;          /* G/W로 부터의 응답   */
+    SYSGWINFO->msg_type     = SYSGWINFO_MSG_ETC;        /* 전문종류 방식  */    
+
+    /* 대외기관 데이터 전송   */
+    if (EXPARM->fil10[0] == '1'){
+        strcpy(SYSGWINFO->func_name, "TCPKABC");
+        rc = sys_tpcall("SYEXTGW_KAB", ctx->cb, TPNOTRAN);
+    }else{
+        rc = sys_tpcall("SYEXTGW_ARS", ctx->cb, TPNOTRAN);
+    }
+
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s ARN0000: z000_err_ext_send()"
+                        "%s 서비스 호출 ERROR [%d][해결방안]대외기관 G/W 담당자 CALL",
+                        __FILE__, tperrno);
+        return ERR_ERR;
+    }
+
+    /* aruklog insert */
+    rc = z100_log_insert(ctx, EXTSENDDATA, sysocbgs(ctx->cb, IDX_EXTSENDDATA),
+                             2 + ctx->log_type_add);
+     if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s ARN0012: z000_err_ext_send()AR LOG ERROR :log_type[%d][해결방안]담당자 CALL",
+                        __FILE__ ,  2 + ctx->log_type_add);
+        sys_err_init();
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int z100_log_insert(arn0012_ctx_t    *ctx, char *log_data, int size, char io_flag,   char sr_flag)
+{
+
+    int                 rc = ERR_NONE;
+    ari3100f_t          ari3100f;
+    commbuff_t          *dcb;
+
+    SYS_TRSF;
+
+    /* ------------------------------------------- */
+    SYS_DBG("z100_log_insert  : len [%d]",  size);
+    SYS_DBG("z100_log_insert  : msg [%s]",  log_data );
+    /* ------------------------------------------- */
+
+    memset(&ari3100f,   0x00, sizeof(ari3100f_t));
+    ari3100f.in.sys_type    =  1;
+    ari3100f.in.log_type    =  log_type;
+    memcpy(ari3100f.in.log_data,    log_data,    size);
+    ari3100f.in.log_len     = size;
+
+    if ((log_type == 1) ||
+        (log_type == 11)){              /* 대왹기관 수신전문 tx_id 포함  */
+        ari3100f.in.tx_id_flag[0] = '1';
+    }
+    else{
+        ari3100f.in.tx_id_flag[0] = '0';
+    }
+
+    memset(&dcb, 0x00, sizeof(commbuff_t));
+
+    rc = sysocbdb(ctx->cb, &dcb);       /* ctx->cb dcb로 복사    */
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s NFN0020: z100_log_insert() NFLOG ERROR sysocbdb log_type :%d", __FILE__, sr_flag);
+        sys_err_init();
+        return ERR_NONE;
+    }
+
+
+    rc = sysocbsi(&dcb, IDX_EXMSG1200,   &ari3100f, sizeof(ari3100f_t));
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s NFN0020: z100_log_insert() NFLOG ERROR sysocbsi log_type :%d", __FILE__, sr_flag);
+        sys_err_init();
+        sysocbfb(&dcb);
+        return ERR_NONE;
+    }
+
+    rc = sys_tpcall("ARN3100F", &dcb, TPNOREPLY | TPNOTRAN);
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s NFN0020: z100_log_insert() NFLOG ERROR sysocbsi log_type :%d", __FILE__, sr_flag);
+        sys_err_init();
+    }
+
+    sysocbfb(&dcb);
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
+
+
 /* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
