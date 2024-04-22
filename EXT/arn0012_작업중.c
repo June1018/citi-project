@@ -712,43 +712,69 @@ static int d200_err_conv(arn0012_ctx_t      *ctx)
 
     return ERR_NONE;
 }
+
+
 /* ------------------------------------------------------------------------------------------------------------ */
 static int e000_jrn_create(arn0012_ctx_t   *ctx)
 {
+
     int                 rc  = ERR_NONE;
-    exi0210x_t          exi0210x;
+    ari2520f_t          ari2520f;
+    ari2530f_t          ari2530f;
+    ari2540f_t          ari2540f;
+    ari2550f_t          ari2550f;
+    armsgcomm_t         *armsgcomm;
 
     SYS_TRSF;
+    /* EXPARM host send jrn make가 2,3,4인겨우 만 처리 
+       2:사고수표저널처리 3:지로 저널, 4:공공요금 저널    */
 
-    /*------------------------------------------------------------------------ */
-    SYS_DSP(" e000_jrn_create: tx_code [%s]", ctx->host_tx_code);
-    /*------------------------------------------------------------------------ */
-
-    /*------------------------------------------------------------------------ */
-    /* EXPARM TABLE LOAD                                                       */
-    /*------------------------------------------------------------------------ */
-    memset(&exi0210x,   0x00, sizeof(exi0210x_t));
-    memcpy(exi0210x.in.appl_code, IX_CODE           , LEN_APPL_CODE);
-    memcpy(exi0210x.in.tx_code  , ctx->host_tx_code , LEN_TX_CODE);
-
-    rc = ex_parm_load(&exi0210x);
-    if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s e000_jrn_create(): 거래코드 Loading Error"
-                             "host_tx_code/code/msg [%s:%d:%s]"
-                             "[해결방안] 업무담당자 CALL",
-                             __FILE__, ctx->host_tx_code, sys_err_code(), sys_err_msg());
-        return GOB_NRM;
+    if ((EXPARM->host_send_jrn_make[0] != '2') &&
+        (EXPARM->host_send_jrn_make[0] != '3') &&
+        (EXPARM->host_send_jrn_make[0] != '4')){
+        return ERR_NONE; 
     }
 
-    /* exparm을 commbuff에 저장 */
-    rc = sysocbsi(ctx->cb, IDX_EXPARM, &exi0210x.out.exparm, sizeof(exparm_t));
-    if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s e000_jrn_create():"
-                             "COMMBUFF(EXPARM) SET ERROR host_tx_code[%s]"
-                             "[해결방안] 업무담당자 CALL",
-                             __FILE__, ctx->host_tx_code);
-        return GOB_NRM;
+    armsgcomm = (armsgcomm_t *)ctx->ext_send_data;
+
+    /* 사고수표 저널   */
+    if (EXPARM->host_send_jrn_make[0] == '2'){
+        memset(&ari2520f,   0x00,   sizeof(ari2520f_t));
+        memcpy(ari2520f.in.kftc_send_data,  armsgcomm->msg_send_data, LEN_ARMSGCOMM_MSG_SEND_DATE);
+        ari2520f.in.sys_type  = '1';
+        ari2520f.in.exmsg1200 = EXMSG1200;
+        rc = ar_jrn2_create(&ari2520f);
     }
+    else if (EXPARM->host_send_jrn_make[0] == '3'){
+        memset(&ari2530f,   0x00,   sizeof(ari2530f_t));
+        memcpy(ari2530f.in.kftc_send_data,  armsgcomm->msg_send_data, LEN_ARMSGCOMM_MSG_SEND_DATE);
+        ari2530f.in.sys_type  = '1';
+        ari2530f.in.armsg     = ctx->ext_send_data;
+        ari2530f.in.exmsg1200 = EXMSG1200;
+        rc = ar_jrn3_create(&ari2530f);
+    }
+    else if (EXPARM->host_send_jrn_make[0] == '4'){
+        memset(&ari2540f,   0x00,   sizeof(ari2540f_t));
+        memcpy(ari2540f.in.kftc_send_data,  armsgcomm->msg_send_data, LEN_ARMSGCOMM_MSG_SEND_DATE);
+        ari2540f.in.sys_type  = '1';
+        ari2540f.in.armsg     = ctx->ext_send_data;
+        ari2540f.in.exmsg1200 = EXMSG1200;
+        rc = ar_jrn3_create(&ari2534f);
+    } 
+
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%.7s: ARN0012 : e000_jrn_create() "
+                             " ar_jrn%c create ERROR", __FILE__, EXPARM->host_send_jrn_make[0]);
+        SET_ERR_RSPN("189");
+        return ERR_ERR;
+    }
+
+    /* -------------------------------------------- */
+    /* arjrnkti 저널 생성                             */
+    /* -------------------------------------------- */
+    memset(&ari2550f,   0x00, sizeof(ari2550f_t));
+    
+
 
     SYS_TREF;
 
