@@ -482,10 +482,11 @@ static int b100_kti_recv_logging(arn0012_ctx_t  *ctx)
     }
 
     /*
-    
-    
-    
-    
+    1200넘는 부분까지 로깅을 위해서 append
+    strlen(exi0280.out.data)에 추가분 데이터 사이즈가 포함됨에 유의.....
+    기존KFTC에서 반은 1200초과되는 전문을 그대로 사용하는 것으로 변경 
+    exmsg4000 = (&exmsg4000 *)HOSTRECVDATA;
+    memcpy(&exi0280x.out.data)[sizeof(exmsg1200_comm_t)],  exmsg4000->over1200, ctx->append_size);
     */
     memcpy(&exi0280.out.data[sizeof(exmsg1200_comm_t)],  ctx->ext_send_data + ctx->append_index, ctx->append_size);
 
@@ -640,6 +641,76 @@ SYS_CATCH:
 static int d200_err_conv(arn0012_ctx_t      *ctx)
 {
     int                 rc  = ERR_NONE;
+    exi0230x_t          exi0230x;
+    armsgcomm_t         *armsgcomm;
+
+    SYS_TRSF;
+
+    if (EXPARM->host_comm_flag[0] != '1'){
+        return ERR_NONE;
+    }
+
+    if (memcmp(ctx->kti_recv_data.err_code, "0000000", LEN_EXMSG1200_ERR_CODE) == 0){
+        return ERR_NONE;
+    }
+
+    memset(&exi0230x,   0x00,   sizeof(exi0230x_t));
+    exi0230x.in.conv_flag[0] = EXI0230X_HOST_TO_EXT;
+    strcpy(exi0230x.in.appl_code,       AR_CODE);
+    strcpy(exi0230x.in.sub_appl_code,   "00");
+    memcpy(exi0230x.in.err_code,        ctx->kti_recv_data.err_code,    LEN_EXI0230X_ERR_CODE);
+
+    rc = ex_err_conv(&exi0230x);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%.7s: ARN0012 : d200_err_conv() "
+                             " ex_err_conv ERROR", __FILE__);
+        SET_ERR_RSPN("188");
+        return ERR_ERR;
+    }
+
+
+    /* -------------------------------------------- */
+    /* 주택청약 거래이면 278 에러인 경우 에러코드 재처리 861  */    
+    /* 은행 사용 불가 응답코드(830)은 기타거래불가(861)로    */
+    /* 응답처리함                                     */
+    /* -------------------------------------------- */
+    if ((memcmp(exi0230x.out.rspn_code, "278", 3) == 0) ||
+        (memcmp(exi0230x.out.rspn_code, "830", 3) == 0)){
+        if ((memcmp(EXPARM->tx_code, "6343100092", LEN_TX_CODE) == 0) ||
+            (memcmp(EXPARM->tx_code, "6554100092", LEN_TX_CODE) == 0) ||
+            (memcmp(EXPARM->tx_code, "6344100092", LEN_TX_CODE) == 0) ||
+            (memcmp(EXPARM->tx_code, "6345100092", LEN_TX_CODE) == 0) ||
+            (memcmp(EXPARM->tx_code, "6346100092", LEN_TX_CODE) == 0) ||
+            (memcmp(EXPARM->tx_code, "6347100092", LEN_TX_CODE) == 0) ){
+                memcpy(exi0230x.out.rspn_code, "861",   3);
+        }
+    }
+
+    //rspn_code = 000으로 임시설정 (테스트)
+    //memcpy(exi0230x.out.rspn_code,    "287",  3);
+
+    /* ext_send_data DATA의 output rspn_code set */
+    armsgcomm = (armsgcomm_t *)ctx->ext_send_data;
+    memcpy(armsgcomm->rspn_code,    exi0230x.out.rspn_code, 3);
+
+    /* -------------------------------------------- */
+    /* 응답코드가 "000"이 아닐경우 처리                   */
+    /* rollback,begin, return SUCCESS(JRN,TOT 미처리) */
+    /* -------------------------------------------- */
+    if ((memcmp(exi0230x.out.rspn_code, "000", 3) != 0) &&
+        (EXPARM->rspn_cmp_code[0] == '1')){
+
+        SYS_DBG("SAF CREATE SKIP RETURN ERR_ERR");
+        /* KTI정상거래가 아닌경우 saf생성하지 않음  */
+        ctx->saf_create_flag = 0;
+
+        /* 응답코드가 000 아니고 JRN, TOT 미반영 거래인 경우 거래 종료  */
+        return ERR_ERR;
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
 }
 /* ------------------------------------------------------------------------------------------------------------ */
 static int e000_jrn_create(arn0012_ctx_t   *ctx)
