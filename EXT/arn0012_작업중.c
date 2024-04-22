@@ -851,148 +851,63 @@ static int f000_canc_jrn_update(arn0012_ctx_t    *ctx)
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
-/* g100 계좌종류구분 체크 신규 추가                                                                                   */
-/* ------------------------------------------------------------------------------------------------------------ */
-static int f100_gcg_icg_acct_chk_proc(arn0012_ctx_t *ctx)
+static int g000_saf_create(arn0012_ctx_t  *ctx)
 {
-    int                 rc = ERR_NONE;
-    char                in_acct_no [16 + 1];
-    char                tmp_acctype[ 1 + 1];
 
-    exi0320f_t          exi0320f;
-
-    SYS_TRSF;
-
-    /****
-     * 계좌종류 구분 체크 FLAG(EXPARM->fil3)
-     * 0:대상아님 (기존처럼 core전송 )
-     * 1:입금계좌 (cr_acct_no)로 계좌구분
-     * 2:출금계좌 (dr_acct_no)로 계좌구분
-     * 3:입금계좌 + 출금계좌(출금계좌기준 전송)
-    */
-    SYS_DBG("EXPARM->fil3=>[%c]", EXPARM->fil3[0]);
-
-    /* host통신여부 검증 */
-    if (EXPARM->fil3[0] == '0'){
-        return ERR_NONE;
-    }
-
-    memset(in_acct_no,  0x00, sizeof(in_acct_no));
-    memset(tmp_acctype, 0x00, sizeof(tmp_acctype));
-    memset(&exi0320f,   0x00, sizeof(exi0320f_t ));
-
-
-    /****
-     * 개설프로그램 기본 CORE
-     * EXPARM_FIL3 0:처리안함 
-     * EXPARM_FIL3 1: cr_acct_no (입금계좌)로 계좌구분
-     * EXPARM_FIL3 2: dr_acct_no (출금계좌)로 계좌구분
-     * EXPARM_FIL3 3:입금계좌 + 출금계좌(출금계좌기준 전송)
-    */
-    ctx->kti_flag[0] = '0' ;  //초기값 0:GCG
-
-    if (EXPARM->fil3[0] == '1') {
-
-        // EXPARM->fil3 = 1 => CR_ACCT_NO 로 계좌구분
-        memcpy(in_acct_no, EXMSG1200->cr_acct_no, LEN_EXMSG1200_CR_ACCT_NO);
-
-        /*------------------------------------------------------------------------ */
-        /* ACCT_TYPE(계좌종류 구분필드 )판단모듈 호출 -START                              */
-        /*------------------------------------------------------------------------ */
-        memcpy(exi0320f.in.acct_no,     in_acct_no,     LEN_EXI0320F_ACCT_NO);
-        memcpy(exi032of.in.curr_code,   "KRW",          LEN_EXI0320F_CURR_CODE);
-
-        ex_icg_gcg_acct(&exi0320f);     /* ACCT_TYPE(계좌종류 구분필드) 판단모듈 호출     */
-
-        SYS_DBG("exi0320f.out.acct_type[%d]", exi0320f.out.acct_type);
-
-        /* 계좌종류구분 4:ICG가상계좌, 5:ICG계좌만 KTI로 전송     */
-        if (exi0320f.out.acct_type == 4 || exi0320f.out.acct_type = 5 ) {
-            ctx->kti_flag[0] = '1'; //1:ICG
-        }
-
-        /* integer Type Acct_type을 string 타입으로 변환 */
-        sprintf(tmp_acctype,    "%.1d", exi0320f.out.acct_type);
-
-        if (EXPARM->fil3[0] == '1') {
-            //cr_acct_type SET
-            memcpy(EXMSG1200->cr_acct_type, tmp_acctype,    strlen(tmp_acctype));
-        }else if (EXPARM->fil3[0] == '2' || EXPARM->fil3[0] == '3'){
-            //dr_acct_type SET
-            memcpy(EXMSG1200->dr_acct_type, tmp_acctype, strlen(tmp_acctype));
-        }
-
-        /*--------------------------------------------------------------------
-          ACCT_TYPE(계좌종류 구분필드)판단 모듈 호출 - END
-        --------------------------------------------------------------------*/
-    }else {
-        ctx->kti_flag[0] = '0';          //초기값 0:GCG
-        EXMSG1200->cr_acct_no[0] = '1';  //초기값 1:수신계좌 GCG
-        EXMSG1200->dr_acct_no[0] = '1';  //초기값 1:수신계좌 GCG
-
-    }
-
-
-#ifdef _DEBUG
-    /*------------------------------------------------------------------------ */
-    SYS_DBG("================================================================");
-    SYS_DBG("                         GCG ICG 계좌체크                         ");
-    SYS_DBG("================================================================");
-    SYS_DBG("ctx->kit_flag          : [%s]",   ctx->kti_flag                  );
-    SYS_DBG("EXMSG1200->cr_acct_type: [%s]",   EXMSG1200->dr_acct_type        );
-    SYS_DBG("EXMSG1200->cr_acct_type: [%s]",   EXMSG1200->cr_acct_type        );
-    SYS_DBG("================================================================");
-    /*------------------------------------------------------------------------ */
-#endif
-
-    SYS_TREF;
-
-    return ERR_NONE;
-
-
-}
-
-/* ------------------------------------------------------------------------------------------------------------ */
-static int g000_ix_skn_check(arn0012_ctx_t  *ctx)
-{
     int                 rc  = ERR_NONE;
-    ixi0120f_t          ixi0120f;
+    ari2930f_t          ari2930f;
+    ari2940f_t          ari2940f;
 
+    /* 
+      자기앞 수표, 가계 수표, 결번조회시 saf조회 실패한 경우 KTI통신함 
+      KTI통신한 결과를 saf에 저장 
+     */
     SYS_TRSF;
 
-    /*------------------------------------------------------------------------ */
-    SYS_DSP("g000_ix_skn_check : kftc_skn_chk[%s]",  EXPARM->kftc_skn_chk);
-    /*------------------------------------------------------------------------ */
+    if ((EXPARM->saf_tab_type[0] != '3') &&         /* 자기앞 수표 결번  */
+        (EXPARM->saf_tab_type[0] != '4')){          /* 가계 수표 결번   */
+        return ERR_NONE; 
+    }
 
-    if (EXPARM->kftc_skn_chk[0] != '1')
-        return ERR_NONE;
+    if (EXPARM->saf_tab_type[0] == '3'){
+        if (memcmp(EXMSG1200->err_code, "0000000", 7) != 0){
+            EXPARM->saf_upd_flag[0] = '0';
+            EXPARM->tot_pod_flag_1[0] = '0';   
+        }
+        else{
+            memset(&ari2930f,   0x00,   sizeof(ari2930f_t));
+            ari2930f.in.ar0200c,  (armsg0200c_t *)ctx->ext_send_data;
+            ari2930f.in.exmsg1200 = &ctx->kti_recv_data;
 
-    /*------------------------------------------------------------------------ */
-    /* 결번검증 처리                                                              */
-    /*------------------------------------------------------------------------ */
-    memset(&ixi0120f, 0x00, sizeof(ixi0120f_t));
+            rc = ar_saf3_create(&ari2930f);
 
-    /* Decoupling ------------------------------------------------------------ */
-    ixi0120f.in.in_flag         = 1;        /* 0:취급업무   1:개설업무             */
-    ixi0120f.in.max_flag        = 0;        /* 0:결번검증   1:MAX채번             */
-    memcpy(ixi0120f.in.in_host_skn_chk, EXPARM->in_host_skn_chk, 1); /* 결번검증 여부 */
-    memcpy(ixi0120f.in.in_kti_flag    , ctx->kti_flag          , 1); /* 시스템구분 0:GCG , 1:ICG */
-    /* Decoupling ------------------------------------------------------------ */
+        }
+    }
+    else if (EXPARM->saf_tab_type[0] == '4'){
+        if (memcmp(EXMSG1200->err_code, "0000000", 7) != 0){
+            EXPARM->saf_upd_flag[0] = '0';
+            EXPARM->tot_pod_flag_1[0] = '0';   
+        }
+        else{
+            memset(&ari2940f,   0x00,   sizeof(ari2940f_t));
+            ari2940f.in.ar0200c,  (armsg0200c_t *)ctx->ext_send_data;
+            ari2940f.in.exmsg1200 = &ctx->kti_recv_data;
+            rc = ar_saf4_create(&ari2940f);
+        }
+    }
 
-    ixi0120f.in.exmsg1200   = EXMSG1200;
-
-    SYS_TRY(ix_skn_chk(&ixi0120f));
-
-    sys_tx_commit(TX_CHAINED);
-    EXPARM->kftc_dup_chk[0] = ixi0120f.out.dup_chk_flag[0];
-
-    return ERR_NONE;
-
-SYS_CATCH:
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%.7s: ARN0012 : g000_saf_create() "
+                             " ar_saf%c create ERROR", __FILE__, EXPARM->saf_tab_type[0] );
+    
+        SET_ERR_RSPN("189");
+        return ERR_ERR;
+    }
 
     SYS_TREF;
 
-    return GOB_ERR;
+    return ERR_NONE;
+
 
 }
 
