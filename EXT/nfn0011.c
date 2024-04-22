@@ -303,7 +303,7 @@ static int d000_jrn_insert(nfn0011_ctx_t    *ctx)
     memcpy(nfi0002f.in.corr_id,    ctx->corr_id,    LEN_NFI0002F_CORR_ID);
     nfi0002f.in.kti_flag[0] = ctx->kti_flag;
 
-    SYS_DBG("jrn_no ================== msg_no:[%s][%s]", nfi0002f.in.msg_no, nfi0002f.in.corr_id);
+    SYS_DBG("d000_jrn_insert ============ msg_no:[%s]corr_id[%s]", nfi0002f.in.msg_no, nfi0002f.in.corr_id);
 
     rc = nf_jrn_insupd(&nfi0002f);
 
