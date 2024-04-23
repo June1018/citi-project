@@ -290,7 +290,24 @@ static int   b100_mqparm_load(symqrecv_tax_ctx_t   *ctx)
     return ERR_NONE;
 }
 
+/* ------------------------------------------------------------------------------------------------------------ */
+static int  c100_check_available_time(symqrecv_tax_ctx_t    *ctx)
+{
+    int                 rc = ERR_NONE;
+    char                curtime[LEN_TIME + 1];
 
+    utotime1(curtime);
+    if ((memcmp(curtime, EXMQPARM->mq_start_time,    6) < 0) ||
+        (memcmp(curtime, EXMQPARM->mq_end_time  ,    6) > 0)){
+
+            SYS_DBG(" --------------------------------------------------------------------------------- ");
+            SYS_DBG(" Service available time : %s ~ %s ", EXMQPARM->mq_start_time, EXMQPARM->mq_end_time );
+            SYS_DBG(" --------------------------------------------------------------------------------- ");
+            return ERR_ERR;
+        }
+
+        return ERR_NONE;
+}
 
 /* ------------------------------------------------------------------------------------------------------------ */
 static int   d100_init_mqcon(symqrecv_tax_ctx_t    *ctx)
@@ -313,6 +330,7 @@ static int   d100_init_mqcon(symqrecv_tax_ctx_t    *ctx)
     rc = ex_mq_connect(&ctx->mqhconn, EXMQPARM->mq_mngr);
     if (rc == MQ_ERR_SYS) {
         ex_syslog(LOG_ERROR, "[CLIENT DM] %s d100_init_mqcon MQ OPEN failed g_chnl_code[%s].mq_mngr[%s]", __FILE__, g_chnl_code, EXMQPARM->mq_mngr);
+        ctx->is_mq_connected = 0;
         return ERR_ERR;
     }
 
@@ -326,6 +344,7 @@ static int   d100_init_mqcon(symqrecv_tax_ctx_t    *ctx)
     if (rc == MQ_ERR_SYS) {
         ex_syslog(LOG_ERROR, "[CLIENT DM] %s d100_init_mqcon MQ OPEN failed g_chnl_code[%s].mq_mngr[%s]", __FILE__, g_chnl_code, EXMQPARM->mq_mngr);
         ex_mq_disconnect(&ctx->mqhconn);
+        ctx->mqhconn = 0;
         return ERR_ERR;
     }
 
@@ -347,105 +366,48 @@ static int   d100_init_mqcon(symqrecv_tax_ctx_t    *ctx)
 static int   e100_get_mqmsg(symqrecv_tax_ctx_t   *ctx)
 {
 
-    int                 rc = ERR_NONE;
-    mqimsg001_t         mqimsg001;
+    int                 rc     = ERR_NONE;
+    MQMD                md     = {MQMD_DEFAULT};
 
-    /* DB 연결이 끊어진 경우 재 연결 */
-    if (g_db_connect("") != ERR_NONE) {
-        ex_syslog(LOG_ERROR, "e100_get_mqmsg db_connect re connecting ");
-        tpschedule(60);
-        return GOB_NRM;
+    sys_err_init();
+
+    SYS_DB_ERRORCLEAR;
+
+    memset(MQ_INFO, 0x00,   sizeof(mq_info_t));
+    /* MQPUT을 위한 mq_info_t Set : MQIHEAD + INPDATA   */
+    MQ_INFO->hobj             = &ctx->mqhobj;         /* PUT QUEUE OBJECT */
+    MQ_INFO->hcon             = ctx->mqhconn;         /* QM Connection    */
+    MQ_INFO->coded_charset_id = EXMQPARM->schedule_ms * 1000;  /* MQ Get Timeout milliseconds   */
+working 20240424-----
+    //memcpy(md.MsgId,          MQMI_NONE,      sizeof(md.MsgId));
+    //memcpy(MQMSG001->msg_id,  md.MsgId,       LEN_EXMQMSG001_MSG_ID);
+    //memcpy(mqinfo.msg_id,     MQMSG001.msg_id,LEN_EXMQMSG001_MSG_ID);
+
+    memcpy(mqinfo.corrid,       MQMSG001->corr_id,  strlen(MQMSG001->corr_id));
+    memcpy(mqinfo.msgbuf,       MQMSG001->mqmsg,    MQMSG001->mqlen);
+    mqinfo.msglen = MQMSG001->mq_len;
+    
+
+    rc = ex_mq_put_with_opts(&mqinfo, &md, 0);
+    if (rc == ERR_NONE){
+        rc = ex_mq_commit(&ctx->mqhconn);
+
+        memcpy(MQMSG001->mq_date,   md.PutDate, LEN_EXMQMSG001_MQ_DATE);
+        memcpy(MQMSG001->mq_time,   md.PutTime, LEN_EXMQMSG001_MQ_TIME);
+
+    } else {
+
+        /* reset flag for mq initialize */
+        ctx->is_mq_connected = 0;
+
+        SYS_DBG("CALL ex_mq_put FAIL !!!");
+        ex_syslog(LOG_FATAL, "[APPL_DM] CALL ex_mq_put FAIL [해결방안]시스템 담당자  CALL");
+        ex_mq_rollback(&ctx->mqhconn);
     }
 
-    EXEC SQL DECLARE SENDMSG_CURSOR CURSOR for 
-        SELECT PROC_DATE,
-               CHNL_CODE,
-               APPL_CODE,
-               IO_TYPE,
-               MSG_ID,
-               CORR_ID,
-               PROC_TIME,
-               RSPN_FLAG,
-               ILOG_JRN_NO,
-               SYS_MTIME,
-               PROC_TYPE,
-               ERR_CODE,
-               ERR_MSG,
-               MQ_DATE,
-               MQ_TIME,
-               MQLEN,
-               MQMSG
-          FROM EXMQMSG_001  
-         WHERE CHNL_CODE = :g_chnl_code
-           AND APPL_CODE = :g_appl_code
-           AND PROC_DATE IN (TO_CHAR(SYSDATE, 'YYYYMMDD') , TO_CHAR(SYSDATE-1, 'YYYYMMDD')
-           AND IO_TYPE   IN (3,4)
-           AND PROC_TYPE = 0
-         ORDER BY PROC_DATE, MSG_ID;
+    SYS_TREF;
 
-    EXEC SQL OPEN SENDMSG_CURSOR;
-
-    if (SYS_DB_CHK_FAIL) {
-        db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s e100_get_mqmsg(): CURSOR OPEN (EXMQMSG_001) ERROR [%d][해결방안] 업무담당자CALL: MSG[%s] ", __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
-        return ERR_ERR;
-
-    } 
-
-    while(1){
-        /* error 코드 초기화 */
-        memset(MQMSG001, 0x00, sizeof(exmqmsg_001_t));
-
-
-        EXEC SQL FETCH SENDMSG_CURSOR
-                INTO :MQMSG001->proc_date,
-                     :MQMSG001->chnl_code,
-                     :MQMSG001->appl_code,
-                     :MQMSG001->io_type,
-                     :MQMSG001->msg_id,
-                     :MQMSG001->corr_id,
-                     :MQMSG001->proc_time,
-                     :MQMSG001->rspn_flag,
-                     :MQMSG001->ilog_jrn_no,
-                     :MQMSG001->sys_mtime,
-                     :MQMSG001->proc_type,
-                     :MQMSG001->err_code,
-                     :MQMSG001->err_msg,
-                     :MQMSG001->mq_date,
-                     :MQMSG001->mq_time,
-                     :MQMSG001->mqlen,
-                     :MQMSG001->mqmsg;
-
-        if (SYS_DB_CHK_FAIL){
-            //SYS_DBG("EXMQMSG_001 DATA NOT FOUND");
-            return GOB_NRM;
-        }
-
-        //
-        //PRINT_EXMQMSG_001(MQMSG001);
-        //
-        //MQPUT
-        if (f100_mqmsg_proc(ctx) == ERR_ERR){
-            SYS_DBG("CALL f100_mqmsg_proc !!!!!!!!");
-            return ERR_ERR;
-        }
-
-
-
-
-        memset(&mqimsg001,  0x00, sizeof(mqimsg001_t));
-        mqimsg001.in.mqmsg_001 = MQMSG001;
-        memcpy(mqimsg001.in.job_proc_type, "2", LEN_MQIMSG001_PROC_TYPE);
-        rc = mqomsg001(&mqimsg001);
-        if (rc == ERR_ERR){
-            EXEC SQL ROLLBACK WORK;
-            return ERR_ERR;
-        }
-        EXEX SQL COMMIT WORK;
-
-    }
-
-    return ERR_NONE;   
+    return ERR_NONE;
 
 }
 
