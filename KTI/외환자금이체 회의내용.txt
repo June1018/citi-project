@@ -1,4 +1,29 @@
 [실시간 외환자금이체 회의내용]
+2024-04-23 화요일 EI업무 회의 
+
+
+ASIS
+KTFC-> Forex21 --> CoreBanking -> KTI
+
+TO-BE(Decoupling)
+KFTC -> EI --> GCG  (FOREX21)
+KFTC -> EI --> ICG  (KTI) Flexcube 		
+
+계좌이체 
+
+결제원 종별 코드는 동일한데... 
+대행입금거래고유번호 AN20  MT103 59a 
+무계좌이체 
+지로코드 14 의뢰기관 점별코드 
+
+DFJRN 저널 table에서 찾아서 원거래고유번호 
+
+corr_id  CD/ARS 에서 부터 정의 되어 사용 
+개설 corr_id필요없지만 취급이 있어서 일괄성 차원으로 보내줘야함. 
+corr_id 취급거래 필요하지만 
+KTI corr_id 주면 ... 취급처리할때 ...
+
+취소거래 마지막 corr_id DFLOG 테이블에서 가져와서 체크 
 
 2024-04-18 목요일 주간업무 회의 
 EI결제원 방화벽 작업완료 
