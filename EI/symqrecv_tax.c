@@ -615,6 +615,45 @@ static int   z900_error_rspn_proc(symqrecv_tax_ctx_t    *ctx,   exmqmsg_001_t   
     mqmsg_001->io_type = 4; /*  EI->KTI Response    */
 
     memcpy(mqmsg_001->corr_id,  MQ_INFO->msgbuf+25, 20);
+    mqmsg_001->err_code = 8888888;
 
+
+    tfhlay = (tfhlay_t *)mqmsg_001->mqmsg;
+    memcpy(tfhlay->err_code, "8888888", LEN_TFHLAY_ERR_CODE);
+    
+    memset(&mqimg001, 0x00, sizeof(mqimsg001_t));
+    mqimg001.in.mqmsg_001 = mqmsg_001;
+
+    memset(&mqimsg001.in.job_proc_type, "1" , LEN_MQIMG001_PROC_TYPE);
+    rc = mqomsg001(&mqimg001);
+    if (rc == ERR_ERR){
+        return ERR_ERR;
+    }
+
+    EXEC SQL COMMIT WORK;
+
+
+    return ERR_NONE;
+
+}
+/* ------------------------------------------------------------------------------------------------------------ */
+int  symqrecv_tax(commbuff_t    *commbuff)
+{
+
+    int                 i; 
+
+    return ERR_NONE;
+}
+
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+int   apsvrdone()
+{
+    
+    int           i;  
+
+
+    return ERR_NONE;
 }
 /* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
