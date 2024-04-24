@@ -1,4 +1,16 @@
 [실시간 외환자금이체 회의내용]
+2024-04-24 수요일 주간업무 회의 
+
+CS상태조회
+타발(Incoming) 인 경우 CS검증 시나리오    
+			    CS		KTI ACTION						Dispostition - CSAW        CSAW - APPROVAL  	CSAW-RJT/CNL/BLOCK 
+1. STP      	HIT		SUSPENCE로 일단입금  -결제원정상임 	   Dispostition - CSAW 		OPS Manual 입금 		OPS Manual 입금  -suspence 출금 -->타발은행 입금 
+			 NO HIT     최종계좌로 입금종료  				  N/A					   N/A					  N/A 
+2. 무계좌 		  HIT     SUSPENCE로 일단입금  -결제원정상임    Dispostition - CSAW       OPS Manual 입금         OPS Manual 입금  -suspence 출금 -->타발은행 입금 
+   거주/비거주  NO HIT	   SUSPENCE로 일단입금  -결제원정상임    N/A                       OPS Manual 입금 		   N/A 
+
+
+
 2024-04-23 화요일 EI업무 회의 
 
 
