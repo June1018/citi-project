@@ -378,80 +378,195 @@ static int   e100_get_mqmsg(symqrecv_tax_ctx_t   *ctx)
     MQ_INFO->hobj             = &ctx->mqhobj;         /* PUT QUEUE OBJECT */
     MQ_INFO->hcon             = ctx->mqhconn;         /* QM Connection    */
     MQ_INFO->coded_charset_id = EXMQPARM->schedule_ms * 1000;  /* MQ Get Timeout milliseconds   */
-working 20240424-----
-    //memcpy(md.MsgId,          MQMI_NONE,      sizeof(md.MsgId));
-    //memcpy(MQMSG001->msg_id,  md.MsgId,       LEN_EXMQMSG001_MSG_ID);
-    //memcpy(mqinfo.msg_id,     MQMSG001.msg_id,LEN_EXMQMSG001_MSG_ID);
 
-    memcpy(mqinfo.corrid,       MQMSG001->corr_id,  strlen(MQMSG001->corr_id));
-    memcpy(mqinfo.msgbuf,       MQMSG001->mqmsg,    MQMSG001->mqlen);
-    mqinfo.msglen = MQMSG001->mq_len;
-    
+    /********************************************************************************************/
+    /* coded_charset_id : default 819으로 설정함                                                   */
+    /********************************************************************************************/
+    MQ_INFO->coded_charset_id   = EXMQPARM->charset_id;             /* CodedCharSetID           */
 
-    rc = ex_mq_put_with_opts(&mqinfo, &md, 0);
+    /* get mq data      */
+    rc = ex_mq_put_with_opts(MQ_INFO,   &mqmd, EXMQPARM->mq_get_opts);
+    if (rc != ERR_NONE){
+        switch(rc){
+        case MQ_ERR_NO_MSG:                                 /* QUEUE에 쌓인 메시지가 없는 경우        */
+            //SYS_DBG("NO MSG AVAILABLE");
+            return ERR_NONE;
+
+        case MQ_ERR_EMPTY_BUF:                              /* QUEUE에 메시지가 buffer 비어있는 경우  */ 
+            SYS_DBG("EMPTY BUFFER");
+            return ERR_NONE;
+
+        default:
+            ex_syslog(LOG_FATAL, "[CLIENT DM] %s e100_get_mqmsg ex_mq_get failed rc[%d] g_chnl_code[%s]mq_mngr[%s]", __FILE__, rc, g_chnl_code, EXMQPARM->mq_mngr);
+
+            /* rest flag for mq initialize    */
+            ctx->is_mq_connected = 0;
+            return ERR_ERR;
+        }
+    } 
+
+    /********************************************************************/
+    SYS_DBG("msgid[%s] corrid[%s]" , MQ_INFO->msgid,    MQ_INFO->corrid);
+    /********************************************************************/
+
+    /* MQ message는 가져오는 순간 메세지가 큐에서 없어지기 때문에 commit/rollback의 의미가 없음  */
+    rc = f100_mqmsg_proc(ctx, &mqmd);
     if (rc == ERR_NONE){
         rc = ex_mq_commit(&ctx->mqhconn);
-
-        memcpy(MQMSG001->mq_date,   md.PutDate, LEN_EXMQMSG001_MQ_DATE);
-        memcpy(MQMSG001->mq_time,   md.PutTime, LEN_EXMQMSG001_MQ_TIME);
-
-    } else {
-
-        /* reset flag for mq initialize */
-        ctx->is_mq_connected = 0;
-
-        SYS_DBG("CALL ex_mq_put FAIL !!!");
-        ex_syslog(LOG_FATAL, "[APPL_DM] CALL ex_mq_put FAIL [해결방안]시스템 담당자  CALL");
-        ex_mq_rollback(&ctx->mqhconn);
+    }else if (rc != ERR_NONE) {
+        ex_mq_commit(&ctx->mqhconn);
+        return ERR_ERR;
     }
 
-    SYS_TREF;
-
-    return ERR_NONE;
-
+    return rc;
 }
 
 
 /* ------------------------------------------------------------------------------------------------------------ */
 static int   f100_mqmsg_proc(symqrecv_tax_ctx_t *ctx)
 {
-    int                 rc     = ERR_NONE;
-    mq_info_t           mqinfo = {0};
-    MQMD                md     = {MQMD_DEFAULT};
+    
+    int                 rc          = ERR_NONE;
+    long                len         = 0;
+    long                max_msg_len = 0;
+    char                buff[50]    = {0};
+    char                svc_name[32];
+    char                temp_hcmihead[72];
+    char                tcp_tmp_buff[LEN_TCP_HEAD + 1];
+    char                cont_type[1];
+    char                covt_type[1];
+    char                *hp;
+    char                etc_data[900];
+    commbuff_t          dcb;
+    tfhlay_t            *tfhlay;
+    exmqmsg_001_t       mqmsg_001;
+    mqimg001_t          mqimg001;
+    hcmihead_t          hcmihead;
+    sysgwinfo_t         sysgwinfo   = {0};
+    long                data_len    = 0;
 
-
+    ctx->cb = &ctx->_cb;
 
     SYS_TRSF;
 
-    /* MQPUT을 위한 mq_info_t Set : MQIHEAD + INPDATA   */
-    mqinfo.hobj             = &ctx->mqhobj;         /* PUT QUEUE OBJECT */
-    mqinfo.hcon             = ctx->mqhconn;         /* QM Connection    */
-    mqinfo.coded_charset_id = EXMQPARM->charset_id  /* CodedCharSetID   */
+    /* -------------------    hcmihead 세팅   ------------------------- */
+    memset(&hcmihead,   0x00,   sizeof(hcmihead_t));
+    memcpy(&hcmihead,   MQ_INFO->msgbuf,  LEN_HCMIHEAD);
+    /* -------------------    hcmihead 세팅   ------------------------- */
 
-    //memcpy(md.MsgId,          MQMI_NONE,      sizeof(md.MsgId));
-    //memcpy(MQMSG001->msg_id,  md.MsgId,       LEN_EXMQMSG001_MSG_ID);
-    //memcpy(mqinfo.msg_id,     MQMSG001.msg_id,LEN_EXMQMSG001_MSG_ID);
+    memset(&mqmsg_001,  0x00,   sizeof(exmqmsg_001_t));
+    memcpy(mqmsg_001.chnl_code, g_chnl_code,    LEN_EXMQMSG_001_CHNL_CODE);
+    memcpy(mqmsg_001.appl_code, g_appl_code,    LEN_EXMQMSG_001_APPL_CODE);
+    mqmsg_001.io_type = 0;      /*  0이 GET 1이 PUT     */
+    memcpy(mqmsg_001.corr_id,  MQ_INFO->corr_id,  LEN_HCMIHEAD_QUEUE_NAME);
+    utocick(mqmsg_001.msg_id);
 
-    memcpy(mqinfo.corrid,       MQMSG001->corr_id,  strlen(MQMSG001->corr_id));
-    memcpy(mqinfo.msgbuf,       MQMSG001->mqmsg,    MQMSG001->mqlen);
-    mqinfo.msglen = MQMSG001->mq_len;
-    
 
-    rc = ex_mq_put_with_opts(&mqinfo, &md, 0);
-    if (rc == ERR_NONE){
-        rc = ex_mq_commit(&ctx->mqhconn);
+    SYS_DBG("MQ_INFO->msglen [%d]", MQ_INFO->msglen);
 
-        memcpy(MQMSG001->mq_date,   md.PutDate, LEN_EXMQMSG001_MQ_DATE);
-        memcpy(MQMSG001->mq_time,   md.PutTime, LEN_EXMQMSG001_MQ_TIME);
+    if (MQ_INFO->msglen < 1){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f100_mqmsg_proc() message Length ERROR %d MQ_INFO->msglen[%d]", __FILE__, tperrno, MQ_INFO->msglen);
+        return ERR_ERR;
+    }
 
-    } else {
+    mqmsg_001.mqlen = MQ_INFO->msglen;
+    memcpy(mqmsg_001.mqmsg, MQ_INFO->msgbuf, mqmsg_001.mqlen);
 
-        /* reset flag for mq initialize */
-        ctx->is_mq_connected = 0;
+    memset(&mqimg001,   0x00, sizeof(mqimg001_t));
+    mqimg001.in.mqmsg_001   = &mqmsg_001;
 
-        SYS_DBG("CALL ex_mq_put FAIL !!!");
-        ex_syslog(LOG_FATAL, "[APPL_DM] CALL ex_mq_put FAIL [해결방안]시스템 담당자  CALL");
-        ex_mq_rollback(&ctx->mqhconn);
+    memcpy(mqimsg001.in.job_proc_type,  "4",    LEN_MQIMG001_PROC_TYPE);
+    db_rc = mqomsg001(&mqimg001);
+    if (db_rc == ERR_ERR){
+        EXEC SQL ROLLBACK WORK;
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f100_mqmsg_proc() : MQMSG001 INSERT ERROR call mqomsg001", __FILE__);
+        return ERR_ERR;
+    }
+    EXEC SQL COMMIT WORK;
+
+    memset(&dcb,    0x00, sizeof(commbuff_t));
+    /* -------------------------------- */
+    PRINT_HCMIHEAD(&hcmihead);
+    /* -------------------------------- */
+
+
+    /* -----------------------------svc Name Set ------------------------------------- */
+    SYS_TRY(f200_set_exparm(ctx, &hcmihead));
+
+    /* -----------------------------TCP Head Set ------------------------------------- */
+    rc = sysocbsi(ctx->cb, IDX_TCPHEAD, &hcmihead,  LEN_TCP_HEAD);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f100_mqmsg_proc() : "
+                             " COMMBUFF ERR (TCPHEAD) [해결방안]시스템 담당자 CALL",
+                              __FILE__);
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "COMMBUFF SET ERROR");
+        return ERR_ERR;        
+    }else{
+        SYS_DBG("******* hp (TCPHEAD) [%s]", sysocbgp(ctx->cb, IDX->TCPHEAD));
+    }
+
+    /* -----------------------------MSG      Set ------------------------------------- */
+    rc = sysocbsi(ctx->cb,  IDX_HOSTRECVDATA, MQ_INFO->msgbuf + LEN_TCP_HEAD + LEN_EIERRHEAD, MQ_INFO->msglen - LEN_TCP_HEAD);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s MSG TMAX SEND COMMBUFF(IDX_HOSTRECVDATA) SET ERROR ", __FILE__);
+        return ERR_ERR;
+    }
+
+    /* ------ KTI 구별용 Flag 넣어줌 ----- */
+    sysgwinfo.sys_type = SYSGWINFO_SYS_KTI;
+
+    rc = sysocbsi(ctx->cb,  IDX_SYSGWINFO,  &sysgwinfo, LEN_SYSGWINFO);
+    if (rc == ERR_ERR){
+        SYS_HSTERR(SYS_LN, 8700, "sysocbsi(IDX_SYSGWINFO) failed - queue_name[%.20s]", hcmihead.queue_name);
+    }
+
+    /* call svc  */
+    SYS_TRY(g000_call_svc(ctx));
+
+    //SYS_TREF;
+
+    return ERR_NONE;
+
+SYS_CATCH:
+    SYS_TREF;
+    return ERR_ERR;
+
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int  f200_set_exparm(symqrecv_tax_ctx_t  *ctx,   hcmihead_t         *hcmihead)
+{
+    int                 rc  = ERR_NONE;
+    exi0331_t           exi0331 = {0};
+
+    SYS_TRSF;
+
+    //memcpy(AP_SVC_NAME,  "IGN0000",   LEN_EXPARM_AP_SVC_NAME);
+    /* get ap svc name */
+    exi0331.in.proc_type = 4;
+    memcpy(exi0331.in.kti_tx_code,  hcmihead->tx_code,  LEN_EXPARMKTI_KTI_TX_CODE);
+    rc = ex_exchange_kti_tx_code(&exi0331);
+    if (rc == ERR_ERR){
+        SYS_HSTERR(SYS_LN, 9000, "ex_exchange_kti_tx_code[%s] failed", exi0331.in.kti_tx_code);
+        return ERR_ERR;
+    }
+
+    memcpy(AP_SVC_NMAE, exi0331.in.ap_svc_name, LEN_EXPARMKTI_AP_SVC_NAME);
+
+    SYS_DBG("AP_SVC_NAME [%s]", AP_SVC_NMAE);
+
+    utotrim(AP_SVC_NMAE);
+
+    if (strlen(AP_SVC_NMAE) == 0){
+        //SYS_HSTERR(SYS_LN, 9000, "null[%s] ", exi0331.in.kti_tx_code);
+        return ERR_ERR;
+    }
+
+    rc = sysocbsi(ctx->cb,  IDX_EXPARM, MQ_INFO->msgbuf,    MQ_INFO->msglen);
+    if (rc == ERR_ERR){
+        SYS_HSTERR(SYS_LN, 8700, "sysocbsi (IDX_EXPARM) failed");
+        return ERR_ERR;
     }
 
     SYS_TREF;
@@ -460,26 +575,46 @@ static int   f100_mqmsg_proc(symqrecv_tax_ctx_t *ctx)
 
 }
 
-
 /* ------------------------------------------------------------------------------------------------------------ */
-int    symqrecv_tax(commbuff_t *commbuff)
+static int g000_call_svc(symqrecv_tax_ctx_t     *ctx)
 {
-    int           i;
+    int           rc = ERR_NONE; 
 
+    SYS_TRSF;
+
+    SYS_DBG("***** TCPHEAD  /sysocbgp(ctx->cb, IDX_TCPHEAD) [%s]", sysocbgp(ctx->cb, IDX_TCPHEAD));
+    utohexdp(TCPHEAD, 72);
+
+    SYS_DBG("***** EXPARM  /sysocbgp(ctx->cb, IDX_EXPARM) [%s]", sysocbgp(ctx->cb, IDX_EXPARM));
+    utohexdp(EXPARM,    sizeof(exparm_t));
+
+    SYS_DBG("sys_tpcall[%s]",   AP_SVC_NMAE);
+    rc = sys_tpcall(AP_SVC_NMAE,    ctx->cb, TPNOREPLY | TPNOTRAN);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_FATAL,    "[APPL_DM] %s SYMQSEND_TAX: g000_call_svc() : MSG TAX 서비스 호출 ERR[%d:%d]svc_name[%s]",
+                                __FILE__, tperrno, sys_err_code(), AP_SVC_NMAE);
+        return ERR_ERR;
+    }
+
+    SYS_TREF;
 
     return ERR_NONE;
 
 }
-
-
-
 /* ------------------------------------------------------------------------------------------------------------ */
-
-int   apsvrdone()
+static int   z900_error_rspn_proc(symqrecv_tax_ctx_t    *ctx,   exmqmsg_001_t   *mqmsg_001)
 {
-    int           i;  
 
+    int                 rc  = ERR_NONE;
+    int                 len;
+    tfhlay_t            *tfhlay;
+    mqimsg001_t         mqimsg001;
 
-    return ERR_NONE;
+    memcpy(mqmsg_001.chnl_code, g_chnl_code,    LEN_EXMQMSG_001_CHNL_CODE);
+    memcpy(mqmsg_001.appl_code, "01"       ,    LEN_EXMQMSG_001_APPL_CODE);
+    mqmsg_001->io_type = 4; /*  EI->KTI Response    */
+
+    memcpy(mqmsg_001->corr_id,  MQ_INFO->msgbuf+25, 20);
+
 }
 /* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
