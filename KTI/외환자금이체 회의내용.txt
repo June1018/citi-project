@@ -1,4 +1,33 @@
 [실시간 외환자금이체 회의내용]
+2024-04-26 EI 업무회의 
+SYMQRECV_DFK - KTI        취급/요청0200,응답0210  DFS0000 jrn만들고 -> SYEXTGW_DF
+SYMQRECV_DFF - Forex21				   DFS0020 <- SYEXTGW_DF
+
+mtietc 종별코드	거래구분코드 0200 004000  10자리   RQ 
+
+
+SYMQSEND_DFK - KTI		  개설/요청0200,응답0210  
+SYMQSEND_DFF - Forex21
+온라인 종료 오후 5시 
+
+대사파일 온라인 일괄전송으로 보내준다. 
+DFS0030(온라인 일괄전송 KTI로만 보내준다.)
+
+
+syicgrouter 외화자금대행이체 프젝에서 사용안함 
+
+exo320f 계좌분기 ICG/GCG  
+
+
+
+[과제] EXBRN select * from EXBRN grep에서 찾아서 확인 ....
+이상 
+
+
+
+
+
+
 2024-04-24 수요일 주간업무 회의 
 
 CS상태조회

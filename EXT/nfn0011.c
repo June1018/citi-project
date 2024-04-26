@@ -486,7 +486,7 @@ static int z100_log_insert(nfn0011_ctx_t    *ctx, char *log_data, int size, char
         return ERR_NONE;
     }
 
-    rc = sys_tpcall("NFN3100F", &dcb, TPNOREPLY | TPNOTRAN);
+    rc = sys_tpacall("NFN3100F", &dcb, TPNOREPLY | TPNOTRAN);
     if (rc == ERR_ERR) {
         ex_syslog(LOG_ERROR, "[APPL_DM]%s NFN0011: z100_log_insert() NFLOG ERROR sysocbsi log_type :%d", __FILE__, sr_flag);
         sys_err_init();
