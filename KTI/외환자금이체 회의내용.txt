@@ -109,7 +109,6 @@ BRD Decision
    DWH등 Downstream영향도 분석 - AML모니터링 ICD협의
    EI->KTI거래코드 협의 
    ITR요건 
-coupang 샤오미 미지아 1s b116 올인원 물걸레 로봇청소기
 
 2024-04-15 월요일 업무 회의 
 Work flow 작성 
