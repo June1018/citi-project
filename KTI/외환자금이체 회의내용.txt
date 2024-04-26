@@ -5,6 +5,10 @@ SYMQRECV_DFK - KTI        취급/요청0200  DFS0000(dfn0000.pc  e.g. nfn0000.pc
 SYMQRECV_DFK - KTI        취급/응답0210  DFS0020(dfn0020.pc  e.g. nfn0020.pc참고 )
 SYMQRECV_DFF - Forex21
 
+1.syextgw_cm2.pc
+2. 현재 EI 대부분GW는 read MAX_DATA_LEN = 8000 이므로 11,000 확장필요
+3. mtietc 에서 mti_name = ‘DF_ON’추가. 개설 중 0200/004000 만 svc_name =
+    DFS0011,나머지는 svc_name =DFS0010 select 하도록.함.      match_val = ‘0200004000’ 10자리로 셋팅.
 mtietc.match_val(20)  0200+004000  (종별코드+거래구분코드)10자리   
 POS1_IDX 19 -> 19번째 컬럼, POS1_LEN 4 -> 4자리 
 
