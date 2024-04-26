@@ -3,18 +3,39 @@
 SYMQRECV_DFK - KTI        취급/요청0200,응답0210  DFS0000 jrn만들고 -> SYEXTGW_DF
 SYMQRECV_DFF - Forex21				   DFS0020 <- SYEXTGW_DF
 
-mtietc 종별코드	거래구분코드 0200 004000  10자리   RQ 
-
+mtietc.match_val(20)  0200+004000  (종별코드+거래구분코드)10자리   
+POS1_IDX 19 -> 19번째 컬럼, POS1_LEN 4 -> 4자리 
 
 SYMQSEND_DFK - KTI		  개설/요청0200,응답0210  
 SYMQSEND_DFF - Forex21
-온라인 종료 오후 5시 
 
+EI온라인일괄전송 온라인 종료 오후 5시 이후...작업 . 
 대사파일 온라인 일괄전송으로 보내준다. 
 DFS0030(온라인 일괄전송 KTI로만 보내준다.)
 
 
 syicgrouter 외화자금대행이체 프젝에서 사용안함 
+syicgrouter+nfn0011 합쳐진 형태 
+– syicgroute.c참고
+1. a000_data_recevie
+2. b100_init_proc
+3. 관리전문 여부 판단. 관리전문은 KTI,Forex21모두 보낼것이므로 mgr_flag = 1 set 
+
+4. routing 모듈 dfo0003.pc에서 kti거래여부 판단 (관리전문제외)
+	kti_flag = 0 : Forex21
+    mgr_flag = 1 : KTI 거래 
+
+– nfn0011.pc참고
+5. if KTI: data부의 common, detail(결제원전문)set 7번대 거래코드 set 
+    if Forex21 : detail(결제원전문)set
+	6 번대 거래코드 set (Forex21와 협의 필요)
+6. ctx->trace_no(전문추적번호), ctx->msg_no거래고유번호파싱
+   관리전문은 msg_no(거래고유번호) 없음 
+7. z100_log_insert: dflog insert(1, I)
+8. corr_id채번 , hcmihead set
+9. DFJRN insert / update (msg_no가 이미 있으면 update) 관리전문제외
+10. tpcall SYMQSEMD_DFX
+     거래전문의 kti_flag를 기준으로 Forex21/KTI 전송, 관리전문은 둘다 전송 
 
 exo320f 계좌분기 ICG/GCG  
 
