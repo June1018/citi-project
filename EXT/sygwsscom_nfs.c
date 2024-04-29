@@ -130,7 +130,7 @@ int init_listen(int max)
     if (g_lstninfo == NULL ) {
         ex_sylog(LOG_FATAL, "[APPL_DM]메모리 할당 에러 "
                             "[해결방안] 시스템 담당자 CALL");
-        ex_sylog(LOG_ERROR, "[APPL_DM]% init_listen(): 메모리 할당 에러 : %d"
+        ex_sylog(LOG_ERROR, "[APPL_DM]%s init_listen(): 메모리 할당 에러 : %d"
                             "시스템 담당자 CALL",
                             __FILE__, size);
         return ERR_ERR;
@@ -373,8 +373,219 @@ int add_client_session(inf fd, int cidx, int direction, int keep_alive, int ling
 
     for (i = 0; i < g_session_size; i++){
 
+        if (g_cli_session[i].cidx == cidx){
+            /* session close   */
+            cli_session_close(&cli_session[i]);
+            /* ------------------------------------------- */
+            SYS_DBG("reconnect client session: idx=[%d]", i);
+            /* ------------------------------------------- */
+        }
+
+        if (g_cli_session[i].cidx < 0){
+            g_cli_session[i].fd          = fd;
+            g_cli_session[i].cidx        = cidx;
+            g_cli_session[i].status      = READY;
+            g_cli_session[i].direction   = direction;
+            g_cli_session[i].writing_len = 0;
+            g_cli_session[i].wait_time   = -1;
+
+            /* polling 처리 유무 추가    */
+            time(&g_cli_session[i].poll_tval);
+            if(g_bssess_stat[cidx].prod_name[5] == 'P')
+                g_cli_session[i].poll_flag      = 0;
+            else 
+                g_cli_session[i].poll_flag      = -1;
+
+            time(&g_cli_session[i].tval);
+            if (g_cli_session[cidx].prod_name[4] == 'T')
+                g_cli_session[i].tr_flag        = 1;
+
+            network_nonblock(fd);
+            sys_tpsetfd(fd);
+            g_session_maxi = MAX(g_session_maxi, i);
+
+            /* ------------------------------------------- */
+            SYS_DBG("add client session: idx=[%d]", i);
+            /* ------------------------------------------- */
+
+            /* 새로운 connection 이 맺어졌을때는 gs_step를 초기화해서 session_init로 부터 처리되게끔 유도    */
+            if (g_nf_pt_flag == 9){
+                gs_step = 0;
+            }else{
+                gs_step = 9;
+            }
+
+            return i;
+
+        }
     }
+
+    /* 사용가능한 slot이 없는 경우   */
+    ex_sylog(LOG_FATAL, "[APPL_DM] session slot not available"
+                        "[해결방안] 업무 담당자 CALL");
+    ex_sylog(LOG_FATAL, "[APPL_DM] %s add_client_session():"
+                        " session slot not available : [%d]"
+                        "[해결방안]시스템 담당자 CALL",
+                        __FILE__, g_session_size);
+    close(fd);
+
+    return ERR_ERR;
+
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
+int cli_connect_close(connect_t *cont)
+{
+
+    /* -------------------------------------------------------------------- */
+    SYS_DBG("int cli_connect_close =fd [%d]", cont->fd);
+    /* -------------------------------------------------------------------- */
+
+    if (cont->fd < 0)
+        return ERR_NONE;
+
+    /* clear send buffer */
+    if (cont->wdata != NULL ){
+        free(cont->wdata);
+        cont->wdata = NULL;
+        cont->wlen;
+    }
+
+    /* clear commbuff */
+    sysocbfb(&cont->cb);
+
+    /* socket close   */
+    FL_CLR(cont->fd, &g_wnewset);
+    close(cont->fd);
+
+    /* 전송중 건수 감소   */
+    if (cont->wflag == SYS_TRUE){
+        cont->wflag = SYS_FALSE;
+        g_send_able--;
+        if (g_send_able < 0)
+            g_send_able = 0;
+    }
+
+    init_connect_elem(cont);
+
+    /* session 연결갯수 감소  */
+    if (cont->idx >= g_connection_maxi)
+        g_connection_maxi = cont->idx -1;
+
+    return ERR_NONE;
+
+}
+
+
 /* ------------------------------------------------------------------------------------------------------------ */
+int init_connect(int max)
+{
+
+
+    int                 i; 
+    size_t           size; 
+
+    size = sizeof(connect_t)* max;
+    g_cli_connect= (connect_t) malloc(size);
+    if (g_cli_connect == NULL ) {
+        ex_sylog(LOG_FATAL, "[APPL_DM]메모리 할당 에러 "
+                            "[해결방안] 시스템 담당자 CALL");
+        ex_sylog(LOG_ERROR, "[APPL_DM]%s init_connect(): 메모리 할당 에러 : %d"
+                            "시스템 담당자 CALL",
+                            __FILE__, size);
+        return ERR_ERR;
+    }
+
+    g_connect_size = max;
+    for (i = 0; i < g_connect_size; i++){
+        init_connect_elem(&g_cli_connect[i]);
+        g_cli_connect[i].idx   = i;
+    }
+
+    return ERR_NONE;
+
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+void    init_connect_elem(connect_t *cont)
+{
+    cont->status        = NOT_READY;
+    cont->fd            = -1;
+    cont->portno        = -1;
+    cont->tval          = 0;
+    cont->sidx          = -1;
+    cont->wait_time     = 0;
+    cont->wlen          = 0;
+    cont->wdata         = NULL;
+    cont->ipaddr[0]     = 0x00;
+    cont->wflag         = SYS_FALSE;
+
+    memset(&cont->cb,   0x00, sizeof(commbuff_t));
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+int   add_connect_session(int fd, int portno, char  *ipaddr)
+{
+
+    int                 i; 
+
+    /* -------------------------------------------------------------------- */
+    SYS_DBG("add_connect_session =  fd [%d] port_no = [%d] ", fd, portno);
+    /* -------------------------------------------------------------------- */
+
+    for (i = 0; i < g_connect_size; i++){
+        if (g_cli_connect[i].fd < 0){
+            g_cli_connect[i].fd           = fd;
+            g_cli_connect[i].portno       = portno;
+            g_cli_connect[i].status       = READY;
+            strcpy(g_cli_connect[i].ipaddr, ipaddr);
+            time(&g_cli_connect[i].tval);
+
+            FD_SET(g_cli_connect[i].fd, &g_wnewset);
+            g_wmaxfd    = MAX(g_wmaxfd, fd);
+            network_nonblock(fd);
+            g_connect_maxi   = MAX(g_connect_maxi, i);
+
+            g_cli_connect[i].wflag  = SYS_TRUE;
+            g_send_able++;
+
+            /* -------------------------------------------------------------------- */
+            SYS_DBG("add_connect_session =  idx [%d] ", i);
+            /* -------------------------------------------------------------------- */
+
+            return i;
+        }
+    }
+
+    /* 사용가능한 slot이 없는 경우   */
+    ex_sylog(LOG_FATAL, "[APPL_DM] session slot not available"
+                        "[해결방안] 업무 담당자 CALL");
+    ex_sylog(LOG_FATAL, "[APPL_DM] %s add_connect_session():"
+                        " connect slot not available : [%d]"
+                        "[해결방안]시스템 담당자 CALL",
+                        __FILE__, g_session_size);
+
+    close(fd);
+
+    return -1;
+
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+int session_listen(void)
+{
+    int                 i, j, fd, portno;
+    int                 rtime;
+    time_t              tval;
+
+    time(&tval);
+
+    for (i = 0; i < g_listen_size; i++){
+        
+    }
+}
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
