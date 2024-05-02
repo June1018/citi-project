@@ -582,6 +582,13 @@ int session_listen(void)
     time(&tval);
 
     for (i = 0; i < g_listen_size; i++){
+        /* 이미 연결이 되어 있으면 다시 연결하지 않음.    */
+        if ((g_lstninfo[i].fd       >= 0) ||
+            (g_lstninfo[i].status   == UNREGISTERED))
+            continue;
+
+        /* 회선 정보 index */
+        j = g_lstninfo[i].cidx;
         
     }
 }
