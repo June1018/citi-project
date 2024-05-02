@@ -203,8 +203,208 @@ int usermain(int argc,  char *argv[])
         }
 
         /* request from client    */
+        for (i = 0; i <= g_session_maxi; i++){
+            if ((fd = g_cli_session[i].fd) < 0)
+                continue;
+
+            if ((rc == UCS_USER_MSG) || (select_ret > 0)) {
+                if (sys_tpissetfd(fd)) {
+                    c000_request_from_session(i);
+                }
+
+                if (FD_ISSET(fd, &wallset)){
+                    if (FD_ISSET(fd, &g_wset)){
+                        d000_reply_to_session(i);
+                    }
+                    else{
+                        //
+                        e000_not_wsession_ready(i, trycnt_check);
+                    }
+                }
+            }
+            else if (FD_ISSET(fd, &wallset)){
+                e000_not_wsession_ready(i, trycnt_check);
+            }
+        }
+
+        /* check timeout & connect   */
+        time(&tval);
+        tval -= current_time;
+        if (tval >= DELT_TIMECHK_INT){
+            current_time = tval;
+            x000_timeout_check();
+            polling_timeout_check();
+            all_session_connect(OUTBOUND_SESSION, 1, 0, 3);
+            session_listen();
+        }
     }
+
+    return ERR_NONE;
 }
+
+/* ------------------------------------------------------------------------------------------------------------ */
+int syextgw_cm2(commbuff_t  *commbuff)
+{
+
+    
+    int                 i, rc, len, idx, size;
+
+    dp_inf_t            st_dpi;                 /* malloc 관리용1   */
+    dp_inf_t            *dpi = &st_dpi;         /* malloc 관리용2   */
+
+
+    /* 에러코드 초기화    */
+    sys_err_init();
+
+    /* set commbuff  */
+    memset((char *)ctx, 0x00, sizeof(syextgw_cm2_ctx_t));
+    ctx->cb = commbuff;
+    dpi->dp_free = 0;
+
+    /* SYSTEM GLOBAL 변수에 자신의 서비스명 저장     */
+    strcpy(g_arch_head.svc_name, g_svc_name);
+
+    /* 입력데이터 검증    */
+    if (SYSGWINFO == NULL){
+        SYS_HSTERR(SYS_NN, ERR_SVC_SNDERR,  "INPUT DATA ERR");
+        return ERR_ERR;
+    }
+
+    /* --------------------------------------------------- */
+    PRINT_SYSGWINFO(SYSGWINFO);
+    /* --------------------------------------------------- */
+
+    SYS_DBG("+++++++++++++++++++++++++++++ SYSGWINFO->cont_type[%d]", SYSGWINFO->conn_type);
+
+    /* 회선관련 명령어 검증    */
+    if (SYSGWINFO->conn_type > 0){
+        rc = session_command_proc(SYSGWINFO->conn_type, SYSGWINFO->func_name);
+        return rc;
+    }
+
+    //SYS_DBG("+++++++++++++++++++++++++++++ EXTSENDDATA[%s]", EXTSENDDATA);
+
+    /* 입력데이터 검증   */
+    if (EXTSENDDATA == NULL){
+        SYS_HSTERR(SYS_NN, ERR_SVC_SNDERR,  "INPUT DATA ERR");
+        return ERR_ERR;
+
+    }
+
+    /* 대외기관 연결정보 search     */
+    rc = send_session_search(SYSGWINFO->func_name, &idx);
+    if (rc == ERR_ERR){
+        if (dpi->dp_free){      /* dpi->dp  */
+            free(dpi->dp_free);
+                 dpi->dp_free = 0;
+        }
+        SYS_HSTERR(SYS_NN, ERR_SVC_CONERR, "EXTERNAL NOT CONNECT");
+        return ERR_ERR;
+    }
+
+    /* --------------------------------------------------- */
+    PRINT_SESSION_STAT(&bssess_stat, g_cli_session[idx].cidx);
+    /* --------------------------------------------------- */
+
+    SYS_DBG("+++++++idx[%d] g_cli_session[idx].tr_flag[%d]", idx, g_cli_session[idx].tr_flag);
+
+    /* 전송데이터 생성 */
+    rc = make_external_send_data(ctx->cb, g_cli_session[idx].tr_flag);
+    if (rc == ERR_ERR)
+        return ERR_ERR;
+
+    /* 전송할 버퍼 할당 */
+    size = g_temp_len + 100;
+
+    if (dpi->dp_free == 0){
+        dpi->dp = (char *) malloc(size);
+
+        if (dpi->dp == NULL){
+            ex_syslog(LOG_FATAL, "[APPL_DM] 메모리할당  error [해결방안]시스템 담당자 call");
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s syextgw_cm2()메모리 할당 error: [%d] [해결방안]시스템 담당자call", __FILE__, size);
+            SYS_HSTERR(SYS_NN, ERR_SVC_SNDERR, "MEMORY ALLOC ERR");
+            return ERR_ERR;
+        }else{
+            dpi->dp_free = 1;
+        }
+    }
+
+    if (dpi->dp_free){
+        /* 전송데이터 복사 */
+        memcpy(dpi->dp, g_temp_buf, g_temp_len);
+    }
+    len = g_temp_len;
+
+    /* --------------------------------------------------- */
+    SYS_DBG("+external send data make g_temp_len[%d]g_temp_buff[%s]size[%d]",g_temp_len,g_temp_buf, size);
+    /* --------------------------------------------------- */
+
+    /* 호출방식에 따라서 처리   */
+    if (IS_SYSGWINFO_CALL_TYPE_SAF){
+        /* --------------------------------------------------- */
+        SYS_DBG("g_cli_session[%d]s remider wlen[%d]", idx, g_cli_session[idx].wlen);
+        /* --------------------------------------------------- */
+
+        if (g_cli_session[idx].wlen > 0)
+            rc = session_linked_list(ctx->cb, &g_cli_session[idx], dpi->dp, len, SYSGWINFO->time_val);
+        else
+            rc = session_immediately_send(ctx->cb, &g_cli_session[idx], dpi->dp, len, -1);
+
+        if (rc == ERR_ERR){
+            if (dpi->dp_free){
+                free(dpi->dp_free);
+                dpi->dp_free = 0;
+            }
+
+            return ERR_ERR;
+        }
+
+        /* 데이터전송을 위하여 select에 set  */
+        FD_SET(g_cli_session[idx].fd,  &g_wnewset);
+        g_wmaxfd = MAX(g_wmaxfd, g_cli_session[idx].fd);
+    }
+    else{
+        /* 현재는 대외기관에서 직접 응답을 받는 서비스는 없고 요청과 응답이
+           분리되어 있으므로 이 부분은 개발하지 않음..
+        */
+        if (dpi->dp_free){
+            free(dpi->dp_free);
+            dpi->dp_free = 0;
+        }
+
+        SYS_HSTERR(SYS_NN, ERR_SVC_SNDERR, "GWINFO CALL TYPE ERROR");
+        return ERR_ERR;
+    }
+
+    return ERR_NONE;
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int  a000_data_initial(int argc, char *argv[])
+{
+
+    int                 rc = ERR_NONE;
+    int                 i;
+
+    SYS_TRSF;
+
+    /* select 변수 초기화   */
+    g_wmaxfd = 0;
+    FD_ZERO(&g_wset);
+    FD_ZERO(&g_wnewset);
+
+    /* session 배열 index of OutBound 오류 제거를 위한 초기화    */
+    g_session_idx = 0;
+
+    /* command argument 처리     */
+    SYS_TRY(a100_parse_custom_args(argc, argv));
+
+    /* 대외기관 연결 정보를 구함   */
+    SYS_TRY(get_connect_info());
+
+}
+/* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
