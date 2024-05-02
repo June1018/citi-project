@@ -403,6 +403,76 @@ static int  a000_data_initial(int argc, char *argv[])
     /* 대외기관 연결 정보를 구함   */
     SYS_TRY(get_connect_info());
 
+    /* 서버모드 session 정보 초기화 */
+    SYS_TRY(init_listen(g_host_size));
+
+    /* 회선정보 listen 정보 연결   */
+    for (i = 0; i < g_listen_size; i++){
+        /* 서버모든인 경우에만 처리   */
+        if (g_bssess_stat[i].conn_type[0] == '2')
+            g_lstninfo[i].cidx  = i;
+        else 
+            g_lstninfo[i].cidx  = -1;
+    }
+
+    /* client session 정보 초기화   */
+    g_session_maxi = -1;
+    SYS_TRY(init_session(MAX_CLI_SESSION_EXT));
+    /******************************************************************************************
+     BSSESS_STAT 테이블의 prod_name 필드를 활용하여 전문 헤더별료 활용               
+    
+     결제원 경우 TCP_TP : prod_name[4] == 'T'                                        
+     기타기관은 TCP_2와 같이 셋팅 (2,3,4,5,67,8,9,0 사용 )                           
+                                                                                     
+     tr_flag 2 : size(4)+실전문 : size값은 실전문의 길이 (00101234567890)            
+     tr_flag 3 : size(4)+실전문 : size값은 전체    길이 (0010123456)                 
+                                                                                     
+     tr_flag 4 : TR(9)+size+실전문 : size값은 실전문의 길이 (_________00101234567890)
+     tr_flag 5 : TR(9)+size+실전문 : size값은 실전문의 길이 (_________0010123456)
+
+     *******************************************************************************************/
+
+    for (i = 0; i < g_host_size; i++){
+        g_cli_session[i].tr_flag = g_bssess_stat[i].prod_name[4] - (int)('0');
+
+        //결제원용은 tr_flag=1을 아래 루틴에서 세팅한다. 
+    }
+
+
+    /* 회선정보와 session 정보 연결  */
+    for (i = 0; i < g_host_size; i++){
+        /* client 모드인 경우에만 처리    */
+        if (g_bssess_stat[i].conn_type[0] == '1'){
+            g_cli_session[i].status     = READY;
+            g_cli_session[i].cidx       = i; 
+
+            /* TRANS_ID     FLAG SET   */
+            if (g_bssess_stat[i].prod_name[4] == 'T') g_cli_session[i].tr_flag      = 1;
+            if (g_bssess_stat[i].prod_name[5] == 'P') g_cli_session[i].poll_flag    = 0;
+        }
+        else{
+            g_cli_session[i].cidx = -1;
+        }
+    }
+
+    for (i = 0; i < g_host_size; i++){
+        SYS_DBG("g_cli_session[%d]tr_flag[%s]", i, g_cli_session[i].tr_flag);
+    }
+
+
+    /* DB연결정보 clear    */
+    set_session_init(g_prog_id, g_svc_name);
+
+    /* SYSTEM GLOBAL 변수에 자신의 서비스명을 저장    */
+    strcpy(g_arch_head.svc_name,    g_svc_name);
+    memset(g_arch_head.err_file_name,   0x00, sizeof(g_arch_head.err_file_name));
+
+    /* 대외기관 연결   */
+    all_session_connect(OUTBOUND_SESSION, 1, 0, 3);
+
+
+    /* 기타에서 사용할 MTI 정보를 가져온다.  */
+    rc = get_mti
 }
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
