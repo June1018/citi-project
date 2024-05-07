@@ -809,9 +809,244 @@ static int c100_polling_proc(tcp_session_t  *session)
         time(&session->poll_tval);
         session->poll_flag = 0;
         free(session->tdata);
-        
+        session->tdata  = NULL;
+        session->tlen   = 0;
+        return READ_POLLING;   
+    }
+
+    /* POLLING 요청 메세지인경우    */
+    if (memcmp(&dp[7], "RESPOLL",   7) != 0)
+        return ERR_NONE;
+
+    /* POLLING 응답 전문생성       */
+    memcpy(&dp[7], "RESPOLL"    ,   7);
+
+    SYS_DBG("RESPONSE RESPOLL DATA data[%.*s]", len, dp);
+
+    rc = network_write(session->fd, dp, len);
+    if (rc != len)
+        return ERR_ERR;
+
+    free(session->tdata);
+    session->tdata  = NULL;
+    session->tlen   = 0;
+
+    return READ_POLLING;
+
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int c900_recv_error(tcp_session_t    *session)
+{
+    int                 i;
+    
+
+    i = session->cidx;
+    if (i >= 0){
+        ex_syslog(LOG_ERROR,   "[APPL_DM] %s c000_request_from_session():대외기관 수신 ERROR"
+                               "연결을 끊음: symbname[%s] portno[%s]prog_id[%s]",
+                               __FILE__, g_bssess_stat[i].symb_name,
+                               g_bssess_stat[i].port_no, g_prog_id );
+    }
+
+    /* 대외기관에 전송할 데이터가 남아 있는 경우    */
+    if (session->wlen > 0){
+        /* 요청프로그램 에러인 경우   */
+        SYS_HSTERR(SYS_NN, ERR_SVC_SNDERR,  "DATA SEND ERR");
+        sys_tprelay("EXTRELAY", &session->cb, 0, &session->tmax_ctx);
+
+        /* 회선이 close 됨으로 linked list에 저장된 정보도 전송할 수 없음  */
+        session->session_linked_delete(session);
+
+    }
+
+    cli_session_close(session);
+
+    return ERR_ERR;
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int d000_reply_to_session(int idx)
+{
+
+    int                 rc;
+    tcp_session_t       *session;
+
+    /* ------------------------------------------------------------------ */
+    SYS_DBG("d000_reply_to_session: idx[%d]", idx);
+    /* ------------------------------------------------------------------ */
+
+    /* 해당 session 검증   */
+    session = (tcp_session_t *) &g_cli_session[idx];
+    if ((session->fd     < 0) ||
+        (session->wdata == NULL))
+        return ERR_NONE;
+
+    /* ------------------------------------------------------------------ */
+    //SYS_DBG("d000_reply_to_session: idx[%d]", idx);
+    /* ------------------------------------------------------------------ */
+
+    rc = write_to_session_async(session);
+    if (rc == WRITE_ERROR){
+        /* 전송중 건수 감소   */
+        if (session->wflag == SYS_TRUE){
+            session->wflag = SYS_FALSE;
+            g_send_able--;
+            if (g_send_able < 0)
+                g_send_able = 0;
+        }
+
+        /* 전송할 데이터 해제 */
+        if (session->wdata != NULL){
+            free(session->wdata);
+            session->wdata = NULL;
+            session->wlen  = 0;
+        }
+
+        /* 요청 프로그램 에러 전송 */
+        SYS_HSTERR(SYS_NN, ERR_SVC_SNDERR, "DATA SEND ERR");
+        sys_tprelay("EXTRELAY", &session->cb, 0, &session->tmax_ctx);
+
+        /* 회선이 close됨으로 linked list 에 저장된 정보를 전송할 수 없음.   */
+        session_linked_delete(session);
+        cli_session_close(session);
+
+        return ERR_ERR;
+    }
+
+    if (rc == WRITE_INCOMPLETE) {       /* msg not fully written yet */
+        /* 전송중 건수 증가   */
+        if (session->wflag == SYS_FALSE){
+            session->wflag =  SYS_TRUE;
+            g_send_able++;
+        }
+        FD_SET(session->fd, &g_wnewset);
+        g_wmaxfd = MAX(g_wmaxfd, session->fd);
+
+        /* polling 전문을 전송하지 않은 경우 */
+        if (session->poll_flag == 0)
+            time(&session->poll_tval);
+
+        return ERR_NONE;
+    }
+
+    /* 전송중 건수 감소  */
+    if (session->wflag == SYS_TRUE){
+        session->wflag =  SYS_FALSE;
+        g_send_able--;
+        if (g_send_able < 0)
+            g_send_able = 0;
+    }
+
+    /* 전송할 데이터 해제 */
+    FD_CLR(session->fd, &g_wnewset);
+    free(session->wdata);
+    session->wdata  = NULL;
+    session->wlen   = 0;
+
+    /* polling 전문을 전송하지 않은 경우 */
+    if (session->poll_flag == 0)
+        time(&session->poll_tval);
+
+    /* 대외기관으로 부터 응답을 받지 않거나 
+       또는 대외기관응답 데이터를 전송하지  않는 경우  
+    */
+    sys_tprelay("EXTRELAY", &session->cb,   0, &session->tmax_ctx);
+    sysocbfb(&session->cb);
+    memset(&session->cb,    0x00, sizeof(commbuff_t));
+
+    /* --------------------------------------------------------------- */
+    SYS_DBG("d000_reply_to_session save_cnt [%d]"   , session->tmax_ctx);
+    /* --------------------------------------------------------------- */
+
+    /* 전송할 다음 데이터가 있는지 검증하여 처리   */
+    get_session_next_msg(session);
+    session->wait_time = -1;
+
+    return ERR_NONE;
+
+}
+/* ------------------------------------------------------------------------------------------------------------ */
+static int  e000_not_wsession_ready(int idx, int cnt_check)
+{
+
+    time_t          tval;
+    tcp_session_t   *session;
+
+    /* --------------------------------------------------------------- */
+    SYS_DBG("e000_not_wsession_ready :idx [%d]"   , idx  );
+    /* --------------------------------------------------------------- */
+
+    session = (tcp_session_t *) &g_cli_session[idx];
+    if (session->fd < 0){
+        if (session->tdata != NULL)
+            free(session->tdata);
+        session->tlen;
+        if (session->rdata != NULL)
+            free(session->rdata);
+        if (session->wdata != NULL)
+            free(session->wdata);
+        init_session_elem(session);
+        return ERR_ERR;
+    }
+
+    if (cnt_check){
+        time(&tval);
+        if (tval > (session->wrt_tval + SEND_INTERVAL_TIME)){
+            /* 요청프로그램에 에러 전송   */
+            SYS_HSTERR(SYS_NN, ERR_SVC_SNDERR, "DATA SEND ERR");
+            sys_tprelay("EXTRELAY" , &session->cb, 0, &session->tmax_ctx);
+
+            /* 전송중  건수 감소  */
+            if (session->wflag == SYS_TRUE){
+                session->wflag  = SYS_FALSE;
+                g_send_able--;
+                if (g_send_able < 0)
+                    g_send_able = 0;
+            }
+
+            /* 회선이 close됨 linked list 저장된 정보도 전송할 수 없음   */
+            session_linked_delete(session);
+            cli_session_close(session);
+        }
+        else{
+            FD_SET(session->fd, &g_wnewset);
+            g_wmaxfd = MAX(g_wmaxfd, session->fd);
+        }
+    }
+    else{
+        FD_SET(session->fd, &g_wnewset);
+        g_wmaxfd = MAX(g_wmaxfd, session->fd);
+    }
+
+    return ERR_NONE;
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int x000_timeout_check(void)
+{
+
+    int                 i, rc;  
+    time_t              tval;
+    tcp_session_t       *session;
+    bssess_stat_t       session_stat;
+
+    time(&tval);
+    for (i = 0; i <= g_session_maxi; i++){
+        session = (tcp_session_t *) &g_cli_session[i];
+        if ((session->fd        <  0) ||
+            (session->wait_time <= 0))
+            continue;
+
+        if ((session->wrt_tval + session->wait_time) > tval)
+            continue;
+
+        /* --------------------------------------------------------------- */
+        SYS_DBG("x000_timeout_check :idx [%d]"   , idx  );
+        /* --------------------------------------------------------------- */        
     }
 }
 /* ------------------------------------------------------------------------------------------------------------ */
-/* ------------------------------------------------------------------------------------------------------------ */
-/* ------------------------------------------------------------------------------------------------------------ */
+/* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
