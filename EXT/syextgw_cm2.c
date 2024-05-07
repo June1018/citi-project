@@ -1303,5 +1303,114 @@ static int get_mtietc_info(void)
     if (mti_ptr1 == NULL)
         return ERR_ERR;
 
+    mti_ptr2   = (mtietc_t *) mti_ptr1;
+
+    SYS_DBG("g_van_type[%d]g_mti_time[%s]", g_van_type, g_mti_name);
+
+    EXEC SQL DECLARE MTIETC_CUR CURSOR FOR 
+        SELECT  TO_CHAR(VAN_ID)   AS VAN_ID
+              , MTI_NAME 
+              , SEQ_NO 
+              , MATCH_TYPE 
+              , MATCH_VAL 
+              , RQ_NAME 
+              , SVC_NAME 
+              , POS1_IDX 
+              , POS1_LEN
+              , POS2_IDX 
+              , POS2_LEN 
+              , POS3_IDX 
+              , POS3_LEN 
+         FROM MTIETC 
+        WHERE VAN_ID    = :g_van_type
+          AND MTI_NAME  = TRIM(:g_mti_name)
+    EXEC SQL OPEN MTIETC_CUR;
+
+    if (SYS_DB_CHK_FAIL){
+        db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        free(mti_ptr1);
+        g_mti_size = 0;
+        return ERR_ERR;
+    }
+
+    cnt = 0;
+    while(1){
+        memset(&mtietc, 0x00, sizeof(mtietc_t));
+        EXEC SQL FETCH MTIETC_CUR INTO :mtietc; 
+
+        if (SYS_DB_CHK_FAIL)
+            break;
+
+        utortrim(mtietc.van_id);
+        utortrim(mtietc.mti_name);
+        utortrim(mtietc.match_type);
+        utortrim(mtietc.match_val);
+        utortrim(mtietc.rq_name);
+        utortrim(mtietc.svc_name);
+
+        PRINT_MTIETC(&mtietc);
+
+       memcpy(mti_ptr2, &mtietc, sizeof(mtietc_t));
+       mti_ptr2++;
+       cnt++;
+
+    }
+
+    EXEC SQL CLOSE MTIETC_CUR;
+
+    /*---------------------------------------------------*/
+    SYS_DBG("mtietc:count[%d]", cnt);
+    /*---------------------------------------------------*/
+
+    /* 회선정보가 하나도 없는 경우 */
+    if (cnt == 0){
+        free(mti_ptr1);
+        g_mti_size = 0;
+        return NULL;
+    }
+
+    g_mti_size = cnt;
+
+    g_mtietc = (mtietc_t *)mti_ptr1;
+
+    return ERR_NONE;
 }
+/* ------------------------------------------------------------------------------------------------------------ */
+int apsvrdone()
+{
+
+    int                 i;  
+
+    /*---------------------------------------------------*/
+    SYS_DBG("apsvrdone ********** server down *********");
+    /*---------------------------------------------------*/
+
+    for (i = 0; i < g_session_size; i++)
+    {
+        if (g_cli_session[i].fd < 0)
+            continue;
+
+        /* 대외기관에 전송할 데이터가 남아 있는경우 */
+        if (g_cli_session[i].wlen > 0){
+            /* 요청프로그램에 에러 전송  */
+            SYS_HSTERR(SYS_NN, ERR_SVC_SNDERR, "SERVICE DOWN PROC");
+            sys_tprelay("EXTRELAY", &g_cli_session[i].cb , 0 , &g_cli_session[i].tmax_ctx);
+        }
+
+        /* 전송중 건수 감소 */
+        if (g_cli_session[i].wflag == SYS_TRUE){
+            g_cli_session[i].wflag =  SYS_FALSE;
+            g_send_able--;
+            if (g_send_able < 0)
+                g_send_able = 0;
+        }
+
+        /* 회선이 close됨으로 linked list에 저장된 정보도 전송할 수 없음  */
+        session_linked_delete(&g_cli_session[i]);
+        cli_session_close(&g_cli_session[i])
+    }
+
+    return ERR_NONE;
+}
+
 /* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
