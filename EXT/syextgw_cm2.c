@@ -761,7 +761,57 @@ static int c000_request_from_session(int idx)
     }
 
     /* RQ write   */
-    rc 
+    rc = sys_tpenq(rq_name, dp2, len, 0);
+    SYS_DBG("##################  sys_tqenq rc[%d] ####################", rc);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_FATAL, "[APPL_DM] RQ WRITE ERROR"
+                             "[해결방안] 시스템 담당자 CALL");
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s c000_request_from_session(): "
+                             "[%s] RQ WRITE ERROR : TPERRNO[%d]"
+                             "[해결방안] 시스템 담당자 CALL",
+                                __FILE__, rq_name, tperrno);
+
+        /* message logging   */
+        sprintf(tmp, "%s RQ WRITE ERROR ", rq_name);
+        gw_err_logging(session, tmp);
+    }
+
+    /* clear 수신 buffer */
+    sys_tpfree(dp2);
+
+SYS_CATCH:
+
+    free(session->tdata);
+    session->tdata = NULL;
+    session->tlen  = 0;
+
+    SYS_TREF;
+
+    return ERR_NONE;
 }
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int c100_polling_proc(tcp_session_t  *session)
+{
+
+    int                 rc    , len;
+    char                *dp;
+
+    dp  = session->tdata;
+    len = session->tlen;
+
+    /*  POLLING DATA 처리   */
+    /*  POLLING 요청에 처리 유무 설정    */
+
+
+    /* polling 요청에 대한 응답인 경우   */
+    if (memcmp(&dp[7], "RESPOLL", 7) == 0){
+        time(&session->poll_tval);
+        session->poll_flag = 0;
+        free(session->tdata);
+        
+    }
+}
+/* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
