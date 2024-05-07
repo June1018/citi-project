@@ -1051,8 +1051,257 @@ static int x000_timeout_check(void)
         if (session->wflag == SYS_TRUE){
             session->wflag  = SYS_FALSE;
             g_send_able--;
+            if (g_send_able < 0)
+                g_send_able = 0;
+        }
+
+        /* 전송할 데이터 해제 */
+        if (session->wlen > 0){
+            FD_CLR(session->fd, &g_wnewset);
+            free(session->wdata);
+            session->wdata  = NULL;
+            session->wlen   = 0;
+        }
+
+        SYS_HSTERR(SYS_NN, ERR_SVC_TIMEOUT, "SERVICE TIMEOUT ERR");
+        sys_tprelay("EXTRELAY", &session->cb, 0, &session->tmax_ctx);
+
+        sysocbfb(&session->cb);
+        memset(&session->cb, 0x00, sizeof(commbuff_t));
+
+        /* 전송중에 타임아웃 발생하며 session close 처리 
+           왜냐하면 데이터를 모두 전송하지 않으므로 다음 데이터 전송시 문제 가 발생함 */
+        if (session->writing_len > 0){
+            /* 회선이 close 됨으로 linked list 에 저장된 정보도 전송할 수 없음 */
+            session_linked_delete(session);
+            cli_session_close(session);
         }
     }
+
+    /* polling 처리  */
+    session_polling();
+
+    /* 저장된 데이터도 타임 아웃 검증 */
+    session_linked_list_timeout();
+
+    /* 에러코드 초기화 */
+    sys_err_init();
+
+    return ERR_NONE;
+
 }
 /* ------------------------------------------------------------------------------------------------------------ */
+static long  session_polling(void)
+{
+
+
+    int                 rc = ERR_NONE;
+    int                 i;
+    char                pmsg[1024];
+    time_t              tval;
+    tcp_session_t       *session;
+    int                 tmp_polling_timne = 30 * 1; /* 60 sec * minute  */
+
+    /* polling message */
+    time(&tval);
+    memset(pmsg,    0x00, sizeof(pmsg));
+    make_req_poll_data(pmsg, tval);
+
+
+
+    for ( i = 0; i <= g_session_maxi; i++){
+        session = (tcp_session_t *) &g_cli_session[i];
+        if (session->fd < 0)
+            continue;
+
+        //SYS_DBG("Polling information -> poll_flag _gs");
+        /* polling check */
+        //if((session->poll_flag == -1))
+        if ((session->poll_flag == -1) || ((session->poll_tval + tmp_polling_timne) > tval)){
+            //s
+
+            continue;
+        }
+
+
+        /* ----------------------------------------------------------------------- */
+        SYS_DBG("SEND REQPOLL DATA:idx[%ld][%d][%s]" , i, POLLING_DATA_LEN, pmsg);
+        /* ----------------------------------------------------------------------- */
+
+        rc = network_write(session->fd, pmsg, POLLING_DATA_LEN);
+        if (rc != POLLING_DATA_LEN ){
+            ex_syslog(LOG_ERROR, "[APPL_DM] %s polling 데이터 전송 오류 ", __FILE__);
+
+            /* 전송할 데이터가 있는 경우 */
+            if (session->wlen > 0){
+                FD_CLR(session->fd, &g_wnewset);
+                free(session->wdata);
+                session->wdata  = NULL;
+                session->wlen   = 0;
+
+                SYS_HSTERR(SYS_NN, ERR_SVC_TIMEOUT, "POLLING SEND ERR - TIMEOUT ERR");
+                sys_tprelay("EXTRELAY", &session->cb, 0, &session->tmax_ctx);
+
+                sysocbfb(&session->cb);
+                memset(&session->cb,    0x00, sizeof(commbuff_t));
+            }
+
+            /* 회선이 close 됨으로 linked list에 저장된 정보도 전송할 수 없음   */
+            session_linked_delete(session);
+            cli_session_close(session);
+            continue;
+        }
+
+        session->poll_tval = tval;
+        session->poll_flag = 1;
+    }
+
+    return ERR_NONE;
+    
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static long  polling_timeout_check(void)
+{
+
+    int                 rc = ERR_NONE;
+    int                 i;
+    time_t              tval;
+    tcp_session_t       *session;
+
+    time(&tval);
+    for ( i = 0; i <= g_session_maxi; i++){
+        session = (tcp_session_t *)&g_cli_session[i];
+        if ((session->fd        <= 0)   ||
+            (session->poll_flag != 1))
+            continue;
+
+        if ((session->poll_tval + DEF_POLLING_INT) > tval)
+            continue;
+
+        /* ------------------------------------------------------------- */
+        SYS_DBG("polling timeout:idx[%ld]", i);
+        /* ------------------------------------------------------------- */
+
+        /* 전송할 데이터가 있는 경우   */
+        if (session->wlen > 0){
+            FD_CLR(session->fd, &g_wnewset);
+            free(session->wdata);
+            session->wdata  = NULL;
+            session->wlen   = 0;
+
+            SYS_HSTERR(SYS_NN,  ERR_SVC_TIMEOUT,    "POLLING RECV ERR - TIMEOUT ERR");
+            sys_tprelay("EXTRELAY", &session->cb, 0, &session->tmax_ctx);
+
+            sysocbfb(&session->cb);
+            memset(&session->cb, 0x00, sizeof(commbuff_t));
+        }
+
+        /* polling에 대한 타임아웃이 발생하면 session close 처리 */
+        session_linked_delete(session);
+        cli_session_close(session);
+    }
+
+    return ERR_NONE;
+
+
+}
+/* ------------------------------------------------------------------------------------------------------------ */
+int get_receive_length(char *dp)
+{
+
+    int                 len;
+    char                buff[LEN_SIZE + 1];
+
+#ifdef  _DEBUG
+    /* ------------------------------------------------------ */    
+    utohexdp((char *)dp, g_head_len);
+    /* ------------------------------------------------------ */    
+#endif
+
+    memset(buff, 0x00, sizeof(buff));
+
+    SYS_DBG("결제원용 g_tcp_header_len[%d]", g_tcp_header_len);
+    SYS_DBG("g_cli_session[%d].tr_flag[%d] g_tr_len[%d] LEN_SIZE[%d]", g_session_idx, g_cli_session(g_session_idx).tr_flag, g_tr_len, LEN_SIZE);
+    /******************************************************************************************
+    
+     결제원 경우 TCP_TP : prod_name[4] == 'T'                                        
+     기타기관은 TCP_2와 같이 셋팅 (2,3,4,5,67,8,9,0 사용 )                           
+                                                                                     
+     tr_flag 2 : size(4)+실전문 : size값은 실전문의 길이 (00101234567890)            
+     tr_flag 3 : size(4)+실전문 : size값은 전체    길이 (0010123456)                 
+                                                                                     
+     tr_flag 4 : TR(9)+size+실전문 : size값은 실전문의 길이 (_________00101234567890)
+     tr_flag 5 : TR(9)+size+실전문 : size값은 실전문의 길이 (_________0010123456)
+     결제원에서 들어오는 tr_flag = 0 이기 때문에 13자리임 
+
+     *******************************************************************************************/
+
+     switch(g_cli_session[g_session_idx].tr_flag){
+        case 0:
+            memcpy(buff, &dp[g_tr_len], LEN_SIZE);
+            len = atoi(buff);
+            break;
+        
+        case 1:
+            if (memcmp(&dp[LEN_SIZE], "HDR", 3 ) == 0){
+                memcpy(buff, dp, LEN_SIZE);
+                /* 앞에 tr_len이 붙지 않는 경우인데 9바이트를 추가해서 읽었기 때문에 빼준다. */
+                len = atoi(buff) - 12;
+            }
+            else{
+                memcpy(buff, &dp[g_tr_len], LEN_SIZE);
+                len = atoi(buff) - 3;
+            }
+            break;
+        case 2:
+            memcpy(buff, dp, g_header_len);
+            len = atoi(buff);
+            break;
+        
+        case 3:
+            memcpy(buff, dp, g_header_len);
+            len = atoi(buff) - g_header_len;
+            break;
+
+        case 4:
+            memcpy(buff, &dp[g_tr_len], LEN_SIZE);
+            len = atoi(buff);
+            break;
+
+        case 5:
+            memcpy(buff, &dp[g_tr_len], LEN_SIZE);
+            len = atoi(buff) - g_header_len;
+            break;
+
+        default:
+            SYS_DBG("ERROR FOR HEADER TYPE");
+            return ERR_ERR;
+
+     }
+
+     /* ------------------------------------------------------------------------------------------------- */
+     SYS_DBG("get recevie length: LEN_SIZE[%d] len[%d]", LEN_SIZE, len, buff);
+     /* ------------------------------------------------------------------------------------------------- */
+
+     return len;
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int get_mtietc_info(void)
+{
+
+    int                 cnt, size;
+    mtietc_t            mtietc;
+    mtietc_t            *mti_ptr1;
+    mtietc_t            *mti_ptr2;
+
+
+    size                = sizeof(mtietc_t) * MTIETC_ARRAY_NUM;
+    mti_ptr1            = (mtietc_t *) malloc(size);
+    if (mti_ptr1 == NULL)
+        return ERR_ERR;
+
+}
 /* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
