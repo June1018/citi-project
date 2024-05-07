@@ -542,12 +542,226 @@ static int a100_parse_custom_args(int argc,  char *argv[])
                 g_tr_len    = atoi(optarg);
                 break;
 
-            case 'd':
+            case 'd':   /* TCP HEADER len            */
+                g_tcp_header_len = atoi(optarg);
+                break;
+
+            case 'v':   /* van_type                  */
+                g_van_type  = atoi(optarg);
+                break;
+
+            case 'n':   /* MTI NAME                  */
+                strcpy(g_mti_name,  optarg);
+                break;
+
+            case '?':
+                SYS_DBG("unrecognized option : %s", argv[optind]);
+                return ERR_ERR;
                 
         }
     }
 
+    if (g_rtry_time         <= 0) g_rtry_time       = DFLT_SESSION_RTRY_INT;
+    if (g_rtry_cnt          <= 0) g_rtry_cnt        = MAX_SESSION_RETRY_CNT;
+    if (g_tr_len            <= 0) g_tr_len          = 0;
+    if (g_tcp_header_len    <= 0) g_tcp_header_len  = 0; /* 결제원용을 사용하기 위해서는 tmax_config에 해당 값 셋팅   */
+    if (g_head_len          <= 0) g_head_len        = g_tr_len + g_tcp_header_len;
+
+    if (g_head_len <= 0){
+        ex_syslog(LOG_FATAL,    "[APPL_DM] a100_parse_custom_arg(): HEADER Length error"
+                                "[해결방안] 업무 담당자 call");
+        ex_syslog(LOG_ERROR,    "[APPL_DM] %s a100_parse_custom_arg(): HEADER Length error"
+                                "[해결방안] 업무담당자 call"
+                                , __FILE__);
+        return ERR_ERR;
+    }
+
+    /* ----------------------------------------------------------------------------- */
+    SYS_DBG("prog_id                =[%s]", g_prog_id);
+    SYS_DBG("rtry_time              =[%d]", g_rtry_time);
+    SYS_DBG("rtry_cnt               =[%d]", g_rtry_cnt);
+    SYS_DBG("svc_name               =[%s]", g_svc_name);
+    SYS_DBG("conn_type              =[%d]", g_conn_type);
+    SYS_DBG("tr_len                 =[%d]", g_tr_len);
+    SYS_DBG("tcp_header_len         =[%d]", g_tcp_header_len);
+    SYS_DBG("head_len               =[%d]", g_head_len);
+    SYS_DBG("van_type               =[%d]", g_van_type);
+    SYS_DBG("mti_name               =[%s]", g_mti_name);
+    /* ----------------------------------------------------------------------------- */
+
+    /* 서비스명 검증    */
+    if ((strlen(g_svc_name) == 0)||
+        (g_svc_name[0]      == 0x20))
+        return ERR_ERR;
+
+    return ERR_NONE;
+
 }
+
+
 /* ------------------------------------------------------------------------------------------------------------ */
+static int c000_request_from_session(int idx)
+{
+    int                 i, rc, len, size, m;
+    char                *dp, *dp2;
+    char                jrn_no[LEN_JRN_NO + 10];
+    char                rq_name[32], svc_name[32];
+    char                tmp[256];
+    tcp_session_t       *session;
+    sysgwinfo_t         sysgwinfo;
+    sysicomm_t          sysicomm;
+    commbuff_t          cb;
+    mtietc_t            mtietc;
+    char                match_val[20];
+    int                 match_len;
+
+
+
+    SYS_TRSF;
+
+    /* 에러 코드 초기화   */
+    sys_err_init();
+
+    /* ----------------------------------------------------------------------------- */
+    SYS_DBG("c000_request_from_session: idx[%d]", idx);
+    PRINT_SESSION_STAT(g_bssess_stat, g_cli_session[idx].cidx);
+    /* ----------------------------------------------------------------------------- */
+
+    /* 해당 session 검증   */
+    session = (tcp_session_t *) & g_cli_session[idx];
+    if (session->fd < 0){
+        sys_tpissetfd(session->fd);
+        return ERR_NONE;
+    }
+
+    rc = read_from_session_async(session);
+    if ((rc == READ_ERROR) ||
+        (rc == READ_CLOSE)){
+        /* ---------------------------------------------------- */
+        SYS_DBG("READ_ERROR:[%d] READ_CLOSE[%d]", READ_ERROR, READ_CLOSE);
+        SYS_DBG("in case : rc[%d]", rc);
+        /* ---------------------------------------------------- */
+        c900_recv_error(session);
+        return ERR_ERR;
+    }
+
+    if (rc == READ_INCOMPLETE){         /* msg not ready yet    */
+        if (session->r_trycount > READY_TRYCNT_THRESHOLD) {
+            /* ------------------------------------------------ */
+            SYS_DBG("in case rc[%d]=READY INCOMPLETE and READY_TRYCNT THRESHOLD",rc);
+            /* ------------------------------------------------ */
+            c900_recv_error(session);
+        }
+        return ERR_NONE;
+    }
+
+    session->tdata     = session->rdata; 
+    session->tlen      = session->rlen;   
+    session->rdata     = NULL;
+    session->rlen      = 0;
+
+    /* polling 전문을 전송하지 않은 경우    */
+    if (session->poll_flag == 0)
+        time(&session->poll_tval);
+
+    dp  = session->tdata;
+    len = session->tlen; 
+
+    /* --------------------------------------------------------------------- */
+    SYS_DBG("c000_request_from_session :idx[%d], len[%d]",idx, len);
+    /* --------------------------------------------------------------------- */
+#ifdef  _DEBUG
+    /* --------------------------------------------------------------------- */
+    size = (len > 8192) ? 8192 : len;
+    utohexdp((char *)dp, size);
+    /* --------------------------------------------------------------------- */
+#endif
+
+    /* check poll message  */
+    rc = c100_check_pollin(session);
+    if (rc == READY_POLLING){
+        return ERR_NONE;
+    }
+    else if (rc == ERR_ERR){
+        c900_recv_error(session);
+        return ERR_NONE;
+    }
+
+    /* -------------------------------------------------------------- */
+    /* IF first byte is EBCDIC, first 9 bytes conversed to ASCII      */
+    /* -------------------------------------------------------------- */
+    if ((unsigned char)dp[0] > 0x5a){
+        memcpy(tmp, &dp[0], 9);
+        utoeb2as((unsigned char *)tmp, 9, (unsigned char)tmp);
+        memcpy(&dp[0], tmp, 9);
+    }
+
+    /* 분기정보에서 저장할 RQ명 서비스명 search    */
+    memset(rq_name , 0x00, sizeof(rq_name));
+    memset(svc_name, 0x00, sizeof(svc_name));
+
+    memset(match_val,   0x00, sizeof(match_val));
+    for (m=0; m<g_mti_size; m++){
+        if (g_mtietc[m].match_type[0] == '1'){
+            SYS_DBG("INPUT data[%.*s] match_val[%s]", g_mtietc[m].pos1_len, &session->tdata[g_mtietc[m].pos1_idx], g_mtietc[m].match_val);
+            if (memcmp(&session->tdata[g_mtietc[m].pos1_idx], g_mtietc[m].match_val, g_mtietc[m].pos1_len) == 0){
+                strcpy(rq_name,     g_mtietc[m].rq_name);
+                strcpy(svc_name,    g_mtietc[m].svc_name);
+                break;
+            }
+        }
+    }
+
+    SYS_DBG("MTIETC rq_name[%s]svc_name[%s]", rq_name, svc_name);
+
+    
+    /* 전송할 버퍼 할당 */
+    size = len + 100;
+    dp2  = (char *) sys_tpalloc("CARRY", size);
+    if (dp2 == NULL){
+        ex_syslog(LOG_FATAL,    "[APPL_DM]메모리 할당 에러 "
+                                "[해결방안] 시스템 담당자 CALL");
+        ex_syslog(LOG_ERROR,    "[APPL_DM] %s c000_request_from_session(): 메모리 할당  에러 %d"
+                                "[해결방안] 시스템 담당자 CALL",
+                                __FILE__, size);
+    
+        /* message logging   */
+        gw_err_logging(session, "RQ WRITE ERROR:MALLOC");
+        goto SYS_CATCH;
+    }
+
+    /* 수신할 데이터 복사  */
+    memcpy(dp2, svc_name, 32);
+    switch(g_cli_session[g_session_idx].tr_flag){
+        case 0:
+            memcpy(dp2, svc_name, 32);
+            memcpy(&dp2[32], session->tdata, len);
+            len = session->tlen + 32;
+            SYS_DBG("RQ data[%d][%.*s]", len, len, dp2);
+            break;
+
+        case 1:
+            /* ============================= */
+            /* 금결원 TCP/IP전송                */
+            /* TR_CODE + 실전문 복사            */
+            /* ============================= */
+            memcpy(&dp2[32],            &session->tdata[0],          g_tr_len);
+            memcpy(&dp2[32 + g_tr_len], &session->tdata[g_head_len], len - g_header_len);
+            len = session->tlen + 32;
+            break;
+        case 2:
+        case 3:
+        case 4:
+        case 5:
+            memcpy(dp2      , svc_name, 32);
+            memcpy(&dp2[32] , session->tdata, len);
+            len = session->tlen + 32;
+            SYS_DBG("RQ data[%d][%.*s]", len, len, dp2);
+            break;
+    }
+
+    /* RQ write   */
+    rc 
+}
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
