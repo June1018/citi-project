@@ -455,6 +455,7 @@ static int  a000_data_initial(int argc, char *argv[])
         }
     }
 
+
     for (i = 0; i < g_host_size; i++){
         SYS_DBG("g_cli_session[%d]tr_flag[%s]", i, g_cli_session[i].tr_flag);
     }
@@ -472,9 +473,81 @@ static int  a000_data_initial(int argc, char *argv[])
 
 
     /* 기타에서 사용할 MTI 정보를 가져온다.  */
-    rc = get_mti
+    rc = get_mtietc_info();
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_FATAL, "[APPL_DM] a000_initial() :get_mtietc_info [해결방안] 시스템 담당자 CALL");
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s a000_initial(): g_van_type[%d]g_mti_name[%s]", __FILE__, g_van_type, g_mti_name);
+        return ERR_ERR;
+    }
+
+    /* 대외기관 서버모드 listen */
+    session_listen();
+
+    SYS_TREF;
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    SYS_TREF;
+    return ERR_ERR;
+
 }
+
+
 /* ------------------------------------------------------------------------------------------------------------ */
+static int a100_parse_custom_args(int argc,  char *argv[])
+{
+    int                 rc  = ERR_NONE;
+    extern  char        *optarg;
+    extern  int         optind;
+
+    //
+
+    g_tr_len            = 0;
+    g_tcp_header_len    = 0;
+    g_head_len          = 0;
+
+    while((c = getopt(argc, argv, "w:s:r:c:m:h:p:t:d:v:n")) != EOF){
+        /* ---------------------------------------------------- */
+        SYS_DBG("GETOPT: -%c/n",   c);
+        /* ---------------------------------------------------- */
+
+        switch(c){
+            case 'w':
+                strcpy(g_prog_id, optarg);
+                break;
+
+            case 's':
+                strcpy(g_svc_name, optarg);
+                break;
+
+            case 'r':
+                g_rtry_time = atoi(optarg);
+                break;
+
+            case 'c':
+                g_rtry_cnt  = atoi(optarg);
+                break;
+
+            case 'h':
+                /* TR-code(9)size(4)와 같은 헤더라인 -h 13 -t 9 PRODUCT명은 TCP_4 또는 TCP_5 */
+                g_head_len  = atoi(optarg);
+                break;
+
+            case 'p':   /* TCP/IP connect protocol   */
+                g_conn_type = atoi(optarg);
+                break;
+
+            case 't':   /* TRAN CODE len             */
+                g_tr_len    = atoi(optarg);
+                break;
+
+            case 'd':
+                
+        }
+    }
+
+}
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
