@@ -168,10 +168,110 @@ static int a100_parse_custom_args(int argc, char *argv[])
 
     while(( c = getopt(argc, argv, "c:q:")) != EOF){
         /* -------------------------------------------------------------------- */
-        
+        SYS_DBG("GETOPT: -%c\n", c);
+        /* -------------------------------------------------------------------- */
+
+        switch(c){
+        case 'c':
+            g_acall_max = atoi(optarg);
+            break;
+
+        case 'q' :
+            strcpy(buff, optarg);
+            break;
+
+        case '?':
+            SYS_DBG("unreconized option : -%c %s", c argv[optind]);
+            return ERR_ERR;   
+        }
     }
+
+    /* 응답을 받지 않고 최대 ACALL할 수 있는 갯수 */
+    if (g_acall_max <= 0)
+        g_acall_max = DFLT_MAX_AP_CALL_NUM;
+
+    /* -------------------------------------------------------------------- */
+    SYS_DBG("acall_num [%d]", g_acall_max);
+    SYS_DGB("rq_name   [%s]", buff       );
+    /* -------------------------------------------------------------------- */
+
+    /* RQ 명과 RQ갯수를 구함 */
+    memset(g_rq_info,   0x00, sizeof(g_rq_info));
+    g_rq_num = 0;
+    if (strlen(buff) <= 0){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s a100_parse_custom_args(): RQ명 NOT FOUND",
+                             __FILE__);
+        return ERR_ERR;
+    }
+
+    /* RQ 하나인 경우  */
+    strcat(buff, ":");
+    ptr = strtok(buff, ":");
+    if (ptr == NULL){
+        strcpy(g_rq_info[g_rq_num].rq_name, buff);
+        g_rq_info[g_rq_num++].acall_num = g_acall_max;
+        return ERR_NONE;
+    }
+
+    /* RQ가 두개 이상인 경우 */
+    while(1){
+        strcpy(g_rq_info[g_rq_num++].rq_name, ptr);
+        ptr += strlen(buff) + 1;
+        strcpy(buff, ptr);
+        if (strlen(buff) <= 0)
+            break;
+
+        ptr = strtok(buff, ":");
+        if (ptr == NULL){
+            if (strlen(buff) > 0)
+                strcpy(g_rq_info[g_rq_num++].rq_name, buff);
+            break;
+        }
+    }
+
+    /* RQ가 두개이상인 경우 각 RQ및 처리건수를 동등하개 분배   */
+    num = g_acall_max / g_rq_num;
+    num = (num <= 0) ? 1 : num;
+    for ( i = 0; i < g_rq_num; i++){
+        g_rq_info[i].acall_num = num;
+    }
+
+    /* -------------------------------------------- */
+    SYS_DBG("rq_num = [%d]", g_rq_num);
+    /* -------------------------------------------- */
+
+    SYS_TREF;
+
+    return ERR_NONE;
 }
 /* ------------------------------------------------------------------------------------------------------------ */
+static int  a200_commbuff_init(void)
+{
+
+    int                 rc = ERR_NONE;
+    sysicomm_t          sysicomm;
+    sysgwinfo_t         sysgwinfo;
+
+    SYS_TRSF;
+
+    /* set commbuff  */
+    memset((char *)ctx, 0x00, sizeof(syrqwork_ctx_t));
+    ctx->cb = &ctx->_cb; 
+
+    /* SYSICOMM commbuff 항목 설정   */
+    memset(&sysicomm, 0x00, sizeof(sysicomm_t));
+    sysocbsi(ctx->cb, IDX_SYSICOMM, &sysicomm, sizeof(sysicomm_t));
+    SYSICOMM->intl_tx_flag = 0;
+    utoclck(SYSICOMM->ilog_no);
+    strcpy(SYSICOMM->call_svc_name, "SYRQWORK_DF");
+
+    SYSICOMM->pid_no    = getpid();
+    strcpy(SYSICOMM->svc_name, "SYRQWORK_DF");
+
+    /* GW Information COMMBUFF생성   */
+    memset(&sysgwinfo, 0x00, sizeof(sysgwinfo_t));
+    
+}
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
 /* ------------------------------------------------------------------------------------------------------------ */
