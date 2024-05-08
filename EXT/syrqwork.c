@@ -270,9 +270,182 @@ static int  a200_commbuff_init(void)
 
     /* GW Information COMMBUFF생성   */
     memset(&sysgwinfo, 0x00, sizeof(sysgwinfo_t));
+    sysgwinfo.sys_type = SYSGWINFO_SYS_CORE_BANK;
+
+    sysocbsi(ctx->cb, IDX_SYSGWINFO, &sysgwinfo, LEN_SYSGWINFO);
+
+    SYS_TREF;
+
+    return ERR_NONE;
     
 }
 /* ------------------------------------------------------------------------------------------------------------ */
-/* ------------------------------------------------------------------------------------------------------------ */
-/* ------------------------------------------------------------------------------------------------------------ */
+int b000_tpacall_reply(UCSMSGINFO *reply)
+{
 
+    int                 rc = ERR_NONE;
+
+    SYS_TRSF;
+
+    g_acall_cnt -= 1;
+    if (g_acall_cnt < 0)
+        g_acall_cnt = 0;
+
+    
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
+/* ------------------------------------------------------------------------------------------------------------ */
+static int c000_rq_chk(void)
+{
+
+
+    int                 rc = ERR_NONE;
+    int                 i, j;
+
+    j = g_rq_idx + 1;
+    for ( i = 0; i < g_rq_num; i++){
+        if (j >= g_rq_num)
+            j = 0;
+
+        rc = tpqstat(g_rq_info[j].rq_name, TMAX_RPLY_QUEUE);
+        if (rc <= 0) {
+            j++;
+            continue;
+        }
+
+        g_rq_idx = j;
+        return rc; 
+    }
+
+    return ERR_ERR;
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int  d000_svc_call_proc(ind idx)
+{
+
+    int                 rc = ERR_NONE;
+    char                *rqdata;
+    char                svc_name[XATMI_SERVICE_NAME_LENGTH + 1];
+    char                appl_code[LEN_APPL_CODE + 1];       //Decoupling 추가 
+    char                rqdata_len;
+    commbuff_t          dcb;  
+
+    SYS_TRSF;
+
+
+    rqdata = (char *) sys_tpalloc("CARRY", 2048);
+    if (rqdata == NULL){
+        ex_syslog(LOG_FATAL, "[APPL_DM]메모리 할당 애러 "
+                             "[해결방안] 시스템 담당자 CALL");
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s c000_svc_call_proc():Memory alloc error[%d]"
+                             "[해결방안] 시스템 담당자 CALL",
+                             __FILE__, tperrno);
+        sys_tpfree(rqdata);
+        return ERR_ERR;
+    }
+
+    /* reply rq deque  */
+    rqdata_len = 0;
+    rc = tpdeq(g_rq_info[idx].rq_name, NULL, (char **)&rqdata, &rqdata_len, TPRQS);
+    if (rc < 0){
+        ex_syslog(LOG_FATAL, "[APPL_DM] c000_svc_call_proc(): TPDEQ error"
+                             "[해결방안] TMAX 담당자 CALL");
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s c000_svc_call_proc():Memory alloc error[%d]"
+                             "[해결방안] TMAX 담당자 CALL",
+                             __FILE__, tperrno);
+        sys_tpfree(rqdata);
+        return ERR_ERR;
+    }
+
+    memset(svc_name, 0x00, sizeof(svc_name));
+    memcpy(svc_name, rqdata, XATMI_SERVICE_NAME_LENGTH);
+    utortrim(svc_name);
+
+    /* -------------------------------------------- */
+    SYS_DBG("CALL SVC NAME [%s]rqdata[%s]", svc_name, rqdata);
+    /* -------------------------------------------- */
+
+    /* commbuff 생성  */
+    memset(&dcb, 0x00, sizeof(commbuff_t));
+
+    rc = sysocbdb(ctx->cb, &dcb);
+
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s c000_svc_call_proc():Commbuff Backup error"
+                             "[해결방안] TMAX 담당자 CALL",
+                             __FILE__);
+        sys_tpfree(rqdata);
+        sysocbfb(&dcb);
+        return ERR_ERR;
+    }
+
+    /* EXTRECVDATA COMMBUFF set   */
+    rqdata_len -= XATMI_SERVICE_NAME_LENGTH;
+
+    rc = sysocbsi(&dcb, IDX_EXTRECVDATA, &rqdata[XATMI_SERVICE_NAME_LENGTH], rqdata_len);
+
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s c000_svc_call_proc():"
+                             "COMMBUFF(EXTRECVDATA) SET ERROR "
+                             "[해결방안] TMAX 담당자 CALL",
+                             __FILE__ );
+        sys_tpfree(rqdata);
+        sysocbdb(&dcb);
+        return ERR_ERR;
+    } 
+    /* ----------------------------------------------------------- */
+    /* 개설서비스 분기위한 appl_code 설정 (rq_name으로 구분 )              */
+    /* SVC_NAME 이 SYICGROUTE 경우 CD :chrq, chrq2 -> 086            */
+    /* ----------------------------------------------------------- */
+    if (memcmp(svc_name, "SYICGROUTE", 10) == 0){
+        memset(appl_code,   0x00, sizeof(appl_code));
+
+        if (memcmp(g_rq_info[idx].rq_name, "cdrq",  4) == 0 ||
+            memcmp(g_rq_info[idx].rq_name, "cdrq2", 5) == 0 ){
+            memcpy(appl_code, CD_CODE, LEN_APPL_CODE);
+        }
+        else if (memcmp(g_rq_info[idx].rq_name, "arsrq", 5) == 0){
+            memcpy(appl_code, CD_CODE, LEN_APPL_CODE);
+        }
+        else if (memcmp(g_rq_info[idx].rq_name, "tlrq", 4) == 0){
+            memcpy(appl_code, CD_CODE, LEN_APPL_CODE);
+        }
+        else if (memcmp(g_rq_info[idx].rq_name, "enrq", 4) == 0){
+            memcpy(appl_code, CD_CODE, LEN_APPL_CODE);
+        }
+
+        rc = sysocbsi(&dcb, IDX_EXPARM, &appl_code, LEN_APPL_CODE);
+
+        SYS_DBG("rq_name[%s]appl_code[%s]", g_rq_info[idx].rq_name, appl_code);
+    }
+    /* ------------------------------------------------------------------- */
+
+    /* RQ 메모리 free  */
+    sys_tpfree(rqdata);
+
+
+    /* 업무서비스 call */
+    rc = sys_tpacall(svc_name, &dcb, 0);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM]%s c000_svc_call_proc():"
+                             "%s 서비스 호출 ERROR: TPERRNO[%d]"
+                             "[해결방안] TMAX 담당자 CALL",
+                             __FILE__ , svc_name, tperrno);
+        sysocbdb(&dcb);
+        return ERR_ERR;    
+    }
+
+    sysocbdb(&dcb);
+
+    g_acall_cnt += 1;
+
+    SYS_TREF;
+
+    return ERR_NONE;
+}
+/* ---------------------------------------- PROGRAM   END ----------------------------------------------------- */
