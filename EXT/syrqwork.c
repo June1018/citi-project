@@ -110,3 +110,69 @@ int usermain(int argc,  char *argv[])
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
+static int  a000_data_initial(int argc, char *argv[])
+{
+
+    int                 rc = ERR_NONE;
+
+    SYS_TRSF;
+
+    /* command argument 처리 */
+    SYS_TRY(a100_parse_custom_args(argc, argv));
+
+    /* command argument 처리 */
+    SYS_TRY(a200_commbuff_init());
+
+    /* RQ current index  */
+    g_rq_idx = 0;
+
+    /* tpcall cnt        */
+    g_acall_cnt = 0;
+
+    /* callback function register to tpacall response   */
+    tpregcb(b000_tpacall_reply);
+
+    /* SYSTEM GLOBAL변수에 자신의 서비스명 저장  */
+    strcpy(g_arch_head.svc_name,    "SYRQWORK_DF");
+    memset(g_arch_head.err_file_name, 0x00, sizeof(g_arch_head.err_file_name));
+
+
+    SYS_TREF;
+    return ERR_NONE;
+
+SYS_CATCH:
+
+    SYS_TREF;
+    return ERR_ERR;
+
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------ */
+static int a100_parse_custom_args(int argc, char *argv[])
+{
+
+
+    int                 c;  
+    int                 i, num; 
+    char                buff[512];
+    char                *ptr; 
+    extern char         *optarg;
+    extern int          optind; 
+
+    SYS_TRSF;
+
+    //opterr = 0;
+    g_acall_max = 0;
+    memset(buff, 0x00, sizeof(buff));
+
+    while(( c = getopt(argc, argv, "c:q:")) != EOF){
+        /* -------------------------------------------------------------------- */
+        
+    }
+}
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------ */
+
