@@ -1,4 +1,24 @@
 [실시간 외환자금이체 회의내용]
+
+2024-05-15 FCY DFT 주간업무회의 
+BRD Decision 
+1. 수수료 환율
+2. Preventative Payment Control 개별 요건 조건 최종확정
+   1) Threshold
+   2) Duplicated Payment Control
+   3) Re-key
+   외화입/지급시 Flexcube에서 사유코드입력에 대한 검증 동작여부
+   BRD Finalize - OPS & BIZ sign off
+   FRD review session  금주완료
+   개발 진행 상태 call - 05/20 진행예정 
+   Flexcube ITR On-boarding 협의 plan B
+   PTS 산출물 작성 - Definition
+   1) RRR - GISO review 
+   2) Business Requirement Document 
+   3) Function Requirement Document
+
+
+
 2024-04-26 EI 업무회의 
 
 SYMQRECV_DFK - KTI        취급/요청0200  DFS0000(dfn0000.pc  e.g. nfn0000.pc참고 ) jrn(dfo0002f.pc)program -> DFJRN   insert (Forex21 6번대 KTI 7번대 거래코드) 
