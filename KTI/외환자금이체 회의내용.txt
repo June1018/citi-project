@@ -8,7 +8,7 @@ BRD Decision
    2) Duplicated Payment Control
    3) Re-key
    외화입/지급시 Flexcube에서 사유코드입력에 대한 검증 동작여부
-   BRD Finalize - OPS & BIZ sign off
+   BRD Finalize - OPS & BIZ sign off - 2024.05.17 
    FRD review session  금주완료
    개발 진행 상태 call - 05/20 진행예정 
    Flexcube ITR On-boarding 협의 plan B
