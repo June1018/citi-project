@@ -1,6 +1,12 @@
 [실시간 외환자금이체 회의내용]
+2024-05-24 EI 업무 회의 
+1.포맷오류 전문 pp->KFTC citi->kftc 종별코드 9xxx 거래구분코드 xxxxxx (KTI 송수신 N ,Forex21 송수신 Y)
+             KFTC->pp citi<-kftc 종별코드 9xxx 거래구분코드 xxxxxx (KTI 송수신 Y ,Forex21 송수신 Y)
 
-2024-05-15 FCY DFT 주간업무회의 
+			 개설 전문 포맷오류 flow : KFTC -> (0200) -> EI -> (0200) -> PP   -> (9200) -> EI 
+			 취급 전문 포맷오류 flow : PP   -> (0200) -> EI -> (0200) -> KFTC -> (9200) -> EI -> (9200) -> PP 
+			  
+2024-05-16 FCY DFT 주간업무회의 
 BRD Decision 
 1. 수수료 환율
 2. Preventative Payment Control 개별 요건 조건 최종확정
