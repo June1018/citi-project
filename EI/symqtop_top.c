@@ -354,7 +354,7 @@ static int c100_check_available_time(symqtop_top_ctx_t  *ctx)
 }
 
 /* ---------------------------------------------------------------- */
-static int( d100_init_mqcon(symqtops_onin_ctx_t  *ctx)
+static int d100_init_mqcon(symqtops_onin_ctx_t  *ctx)
 {
     int   rc = ERR_NONE;
 
