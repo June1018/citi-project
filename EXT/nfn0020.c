@@ -265,6 +265,7 @@ static int c000_sel_orig_msg_proc(nfn0020_ctx_t     *ctx)
                  ORDER BY PROC_TIME   DESC 
                ) 
           WHERE ROWNUM = 1;
+
     if (SYS_DB_CHK_FAIL) {
         db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
         ex_syslog(LOG_ERROR, "[APPL_DM]%s c000_sel_orig_msg_proc : 원거래 없음 [%s][%s][%d][%s]"
