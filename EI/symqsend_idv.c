@@ -64,6 +64,8 @@ char                g_chnl_code[3 + 1];                 /* CHANNEL CODE       */
 char                g_appl_code[2 + 1];                 /* APPL_CODE          */
 char                g_pid[6 + 1];                       /* process_id         */
 
+mqi0001f_t    g_mqi000f;
+
 symqsend_idv_ctx_t  _ctx;
 symqsend_idv_ctx_t  *ctx = &_ctx;  
 
