@@ -464,23 +464,12 @@ static int   f100_mqmsg_proc(symqrecv_idv_ctx_t *ctx)
 {
     
     int                 rc          = ERR_NONE;
-    long                len         = 0;
-    long                max_msg_len = 0;
-    char                buff[50]    = {0};
-    char                svc_name[32];
-    char                temp_hcmihead[72];
-    char                tcp_tmp_buff[LEN_TCP_HEAD + 1];
-    char                cont_type[1];
-    char                covt_type[1];
-    char                *hp;
-    char                etc_data[900];
-    commbuff_t          dcb;
-    tfhlay_t            *tfhlay;
-    exmqmsg_001_t       mqmsg_001;
-    mqimg001_t          mqimg001;
+    int                 db_rc;
+    exmqmsg_002_t       mqmsg_002;
+    mqimsg002_t         mqimsg002;
     hcmihead_t          hcmihead;
     sysgwinfo_t         sysgwinfo   = {0};
-    long                data_len    = 0;
+    sysicomm_t          sysicomm    = {0};
 
     ctx->cb = &ctx->_cb;
 
@@ -491,13 +480,25 @@ static int   f100_mqmsg_proc(symqrecv_idv_ctx_t *ctx)
     memcpy(&hcmihead,   MQ_INFO->msgbuf,  LEN_HCMIHEAD);
     /* -------------------    hcmihead 세팅   ------------------------- */
 
-    memset(&mqmsg_001,  0x00,   sizeof(exmqmsg_001_t));
-    memcpy(mqmsg_001.chnl_code, g_chnl_code,    LEN_EXMQMSG_001_CHNL_CODE);
-    memcpy(mqmsg_001.appl_code, g_appl_code,    LEN_EXMQMSG_001_APPL_CODE);
-    mqmsg_001.io_type = 0;      /*  0이 GET 1이 PUT     */
-    memcpy(mqmsg_001.corr_id,  MQ_INFO->corr_id,  LEN_HCMIHEAD_QUEUE_NAME);
-    utocick(mqmsg_001.msg_id);
-
+    memset(&mqmsg_002,  0x00,   sizeof(exmqmsg_002_t));
+    /* chnl_code */
+    memcpy(mqmsg_002.chnl_code, g_chnl_code,    LEN_EXMQMSG_002_CHNL_CODE);
+    /* appl_code */
+    memcpy(mqmsg_002.mq_appl_code, g_appl_code,    LEN_EXMQMSG_002_MQ_APPL_CODE);
+    /* io_type   */
+    mqmsg_002.io_type = 1;      /*  취급요청,취급응답,개설요청,개설응답, 취급콜백 1/2/3/4/5  */
+    /* pid       */
+    memcpy(mqmsg_002.pid    , g_pid        ,   LEN_EXMQMSG_002_PID);
+    /* msg_id    */
+    utocick(mqmsg_002.msg_id);
+    /* corr_id   */
+    memcpy(mqmsg_002.corr_id,  MQ_INFO->corr_id,  LEN_HCMIHEAD_QUEUE_NAME);
+    /* appl_code */
+    memcpy(mqmsg_002.appl_code,&MQ_INFO->msgbuf[91], LEN_EXMQMSG_002_APPL_CODE);
+    /* tx_code */
+    memcpy(mqmsg_002.tx_code  ,&MQ_INFO->msgbuf[81], LEN_EXMQMSG_002_TX_CODE);
+    /* msg_no  */
+    memcpy(mqmsg_002.msg_no, MQ_INFO->corr_id,  strlen(MQ_INFO->corrid));
 
     SYS_DBG("MQ_INFO->msglen [%d]", MQ_INFO->msglen);
 
@@ -506,22 +507,24 @@ static int   f100_mqmsg_proc(symqrecv_idv_ctx_t *ctx)
         return ERR_ERR;
     }
 
-    mqmsg_001.mqlen = MQ_INFO->msglen;
-    memcpy(mqmsg_001.mqmsg, MQ_INFO->msgbuf, mqmsg_001.mqlen);
+    /* msg_no  */
+    memcpy(mqmsg_002.msg_no, MQ_INFO->msgbuf,  MQ_INFO->msglen);
 
-    memset(&mqimg001,   0x00, sizeof(mqimg001_t));
-    mqimg001.in.mqmsg_001   = &mqmsg_001;
+    memset(&mqimsg002, 0x00, sizeof(mqimsg002_t));
 
-    memcpy(mqimsg001.in.job_proc_type,  "4",    LEN_MQIMG001_PROC_TYPE);
-    db_rc = mqomsg001(&mqimg001);
+    mqimsg002.in.mqimsg002 = &mqmsg_002;
+    memcpy(mqimsg002.in.job_proc_type,  "1",    LEN_MQIMG002_PROC_TYPE);
+
+    /* EXMQLOG 로그  insert  */
+    db_rc = mqomsg002(&mqimg002);
     if (db_rc == ERR_ERR){
         EXEC SQL ROLLBACK WORK;
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s f100_mqmsg_proc() : MQMSG001 INSERT ERROR call mqomsg001", __FILE__);
-        return ERR_ERR;
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f100_mqmsg_proc() : EXMQLOG INSERT ERROR call mqomsg002", __FILE__);
+        //return ERR_ERR;
     }
+
     EXEC SQL COMMIT WORK;
 
-    memset(&dcb,    0x00, sizeof(commbuff_t));
     /* -------------------------------- */
     PRINT_HCMIHEAD(&hcmihead);
     /* -------------------------------- */
@@ -545,16 +548,25 @@ static int   f100_mqmsg_proc(symqrecv_idv_ctx_t *ctx)
     /* -----------------------------MSG      Set ------------------------------------- */
     rc = sysocbsi(ctx->cb,  IDX_HOSTRECVDATA, MQ_INFO->msgbuf + LEN_TCP_HEAD + LEN_EIERRHEAD, MQ_INFO->msglen - LEN_TCP_HEAD);
     if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s MSG TMAX SEND COMMBUFF(IDX_HOSTRECVDATA) SET ERROR ", __FILE__);
+        ex_syslog(LOG_FATAL, "[APPL_DM] %s MSG TMAX SEND COMMBUFF(IDX_HOSTRECVDATA) SET ERROR ", __FILE__);
         return ERR_ERR;
     }
 
     /* ------ KTI 구별용 Flag 넣어줌 ----- */
-    sysgwinfo.sys_type = SYSGWINFO_SYS_KTI;
+    sysgwinfo.sys_type = SYSGWINFO_SYS_CORE_BANK;
 
     rc = sysocbsi(ctx->cb,  IDX_SYSGWINFO,  &sysgwinfo, LEN_SYSGWINFO);
     if (rc == ERR_ERR){
         SYS_HSTERR(SYS_LN, 8700, "sysocbsi(IDX_SYSGWINFO) failed - queue_name[%.20s]", hcmihead.queue_name);
+    }
+
+    strcpy(sysicomm.call_svc_name, g_svc_name); //SYMQRECV_IDV 저장  
+    SYS_DBG("sysicomm.call_svc_name:[%s]", sysicomm.call_svc_name);
+
+    sysocbsi(ctx->cb, IDX_SYSICOMM, &sysicomm, sizeof(sysicomm_t));
+    if (rc == ERR_ERR){
+        SYS_HSTERR(SYS_LN, SYS_GENERR, "sysocbsi(SYSICOMM)failed ");
+        return ERR_ERR;
     }
 
     /* call svc  */
@@ -569,7 +581,6 @@ SYS_CATCH:
     return ERR_ERR;
 
 }
-
 
 /* ------------------------------------------------------------------------------------------------------------ */
 static int  f200_set_exparm(symqrecv_idv_ctx_t  *ctx,   hcmihead_t         *hcmihead)
