@@ -94,7 +94,7 @@ int apsvrinit(int argc, char argv[])
     memset(&_ctx,   0, sizeof(mqnsend01_ctx_t));
     ctx = &_ctx;
 
-    SYS_DBG("SYMQSEND_TAX Initialize ");
+    SYS_DBG("SYMQSEND_IDV Initialize ");
 
     rc = a000_initial(argc, argv);
     if (rc == ERR_ERR)
@@ -115,6 +115,17 @@ int apsvrinit(int argc, char argv[])
         ex_syslog(LOG_FATAL, "[APPL_DM] d100_init_mqcon() STEP 1 FAIL [해결방안]시스템담당자 call" );
         return rc;
     }
+
+    //get Process ID
+    utoi2an(getpid(), LEN_EXMQMSG_002_PID, g_pid);
+
+    /* DB연결이 끊어진 경우 재연결     */
+    if (db_connect("") != ERR_NONE) {
+        ex_syslog(LOG_ERROR, "apsvrinit db_connect re connecting " );
+
+    }
+
+    SYS_TREF;
 
     return rc;
 
