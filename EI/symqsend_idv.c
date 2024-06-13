@@ -195,7 +195,6 @@ static int          a100_parse_custom_args((int argc,  char *argv[])
     SYS_DBG("g_svc_name         :[%s]", g_svc_name);
     SYS_DBG("g_chnl_code        :[%s]", g_chnl_code);
     SYS_DBG("g_appl_code        :[%s]", g_appl_code);
-    SYS_DBG("g_sleep_sec        :[%d]", g_sleep_sec);
     /* ----------------------------------------------------------------------------------- */
 
     /* 서비스명 검증 */
