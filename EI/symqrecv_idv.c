@@ -586,12 +586,13 @@ SYS_CATCH:
 static int  f200_set_exparm(symqrecv_idv_ctx_t  *ctx,   hcmihead_t         *hcmihead)
 {
     int                 rc  = ERR_NONE;
-    exi0331_t           exi0331 = {0};
+    exi0212_t           exi0212;
+    //exi0331_t           exi0331 = {0};
 
     SYS_TRSF;
 
     //memcpy(AP_SVC_NAME,  "IGN0000",   LEN_EXPARM_AP_SVC_NAME);
-    /* get ap svc name */
+    /* get ap svc name 
     exi0331.in.proc_type = 4;
     memcpy(exi0331.in.kti_tx_code,  hcmihead->tx_code,  LEN_EXPARMKTI_KTI_TX_CODE);
     rc = ex_exchange_kti_tx_code(&exi0331);
@@ -614,6 +615,27 @@ static int  f200_set_exparm(symqrecv_idv_ctx_t  *ctx,   hcmihead_t         *hcmi
     rc = sysocbsi(ctx->cb,  IDX_EXPARM, MQ_INFO->msgbuf,    MQ_INFO->msglen);
     if (rc == ERR_ERR){
         SYS_HSTERR(SYS_LN, 8700, "sysocbsi (IDX_EXPARM) failed");
+        return ERR_ERR;
+    }*/
+    /* 거래파라미터 정보     */
+    memset(&exi0212, 0x00, sizeof(exi0212_t));
+    exi0212.in.func_code = 2;
+
+    memcpy(exi0212.in.appl_code,        MQ_INFO->msgbuf + 91, LEN_APPL_CODE);
+    memcpy(exi0212.in.tx_code,          MQ_INFO->msgbuf + 81, LEN_TX_CODE  );
+
+
+    /* -------------------------------------------------------------------- */
+    SYS_DBG("f200_set_exparm:appl_code[%s]", exi0212.in.appl_code  );
+    SYS_DBG("f200_set_exparm:tx_code  [%s]", exi0212.in.tx_code    );
+    /* -------------------------------------------------------------------- */
+
+    rc = exparm_hash_algorism(&exi0212);
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s f200_set_exparm():"
+                             "TX_CODE NOT FOUND[해결방안]업무 담당자 CALL",
+                             __FILE__);
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "TX_CODE NOT FOUND");
         return ERR_ERR;
     }
 
