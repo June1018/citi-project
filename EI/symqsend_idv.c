@@ -62,12 +62,10 @@ struct symqsend_idv_ctx_s {
 char                g_svc_name[32];                     /* G/W 서비스명         */
 char                g_chnl_code[3 + 1];                 /* CHANNEL CODE       */
 char                g_appl_code[2 + 1];                 /* APPL_CODE          */
-int                 g_sleep_sec;
-MQHCONN             mqhconn;
-MQHOBJ              mqhobj;
+char                g_pid[6 + 1];                       /* process_id         */
 
-mqnsend01_ctx_t     _ctx; 
-mqnsend01_ctx_t     *ctx; 
+symqsend_idv_ctx_t  _ctx;
+symqsend_idv_ctx_t  *ctx = &_ctx;  
 
 /* ------------------------------------------ exported function  declarations --------------------------------- */
 int                 symqsend_idv(commbuff_t    *commbuff);
