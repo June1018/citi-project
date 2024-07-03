@@ -758,6 +758,11 @@ static int c000_request_from_session(int idx)
             len = session->tlen + 32;
             SYS_DBG("RQ data[%d][%.*s]", len, len, dp2);
             break;
+        case 6:
+            memcpy(dp2,     , svc_name, 32);
+            memcpy(&dp2[32] , session->tdata, len );
+            len = session->tlen + 32;
+            break;
     }
 
     /* RQ write   */
