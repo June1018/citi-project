@@ -173,7 +173,7 @@ static int          a100_parse_custom_args((int argc,  char *argv[])
 int usermain(int argc,  char *argv[])
 {
     int                 rc = ERR_NONE;
-    symqrecv_tax_ctx_t     _ctx = {0};
+    symqrecv_tax_ctx_t     _ctx = {0};111
     symqrecv_tax_ctx_t     *ctx = &ctx;  
 
     /* initial */
