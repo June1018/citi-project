@@ -563,11 +563,6 @@ static int  f200_set_exparm(symqrecv_tax_ctx_t  *ctx,   hcmihead_t         *hcmi
         return ERR_ERR;
     }
 
-    rc = sysocbsi(ctx->cb,  IDX_EXPARM, MQ_INFO->msgbuf,    MQ_INFO->msglen);
-    if (rc == ERR_ERR){
-        SYS_HSTERR(SYS_LN, 8700, "sysocbsi (IDX_EXPARM) failed");
-        return ERR_ERR;
-    }
 
     SYS_TREF;
 

@@ -409,7 +409,7 @@ static int   e100_get_sendmsg(mqnsend_tax_ctx_t   *ctx)
     SYS_DBG("TCPHEAD (hp): %.*s", LEN_HCMIHEAD, hp);
     SYS_DBG("%.*s", LEN_HCMIHEAD, (char *)TCPHEAD);
     SYS_DBG("corr_id %s", ((hcmihead_t *)TCPHEAD)->queue_name);
-
+ 
     /* --------------------------------------------------------------- */
     PRINT_HCMIHEAD((hcmihead_t *)hp);
     /* --------------------------------------------------------------- */
