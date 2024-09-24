@@ -459,8 +459,35 @@ static int z100_log_insert(dfn0030_ctx_t *ctx, char *log_data, int size, char io
     /* TCP/IP 통신헤더 정보     */
     hp = sysocbgs(ctx->cb, IDX_TCPHEAD);
     if (hp != NULL){
-        SYS_DBG("TCP HEAD LOG I")
+        SYS_DBG("TCP HEAD LOG IS OKAY");
+        memcpy(dfi3100f.in.tcp_head,    hp, LEN_TCP_HEAD);
+        SYS_DBG("TCP HEAD[%s]", dfi0003f.in.tcp_head);
     }
+
+    SYS_DBG("z100_log_insert: in_tcphead[%d][%.*s]" strlen(dfi3100f.in.tcp_head), strlen(dfi3100f.in.tcp_head),dfi3100f.in.tcp_head);
+    memset(&dcb,    0x00, sizeof(commbuff_t));
+    rc = sysocbdb(ctx->cb, &dcb);
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s DFN0030: z100_log_insert() DFLOG sysocbdb ERR log_type %d", __FILE__, sr_flag);
+        sys_err_init();
+        return ERR_NONE;
+    }
+
+    rc = sysocbsi(&dcb, IDX_EXMSG1200, &dfi3100f sizeof(dfi3100f_t));
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s DFN0030: z100_log_insert() DFLOG sysocbsi ERR log_type %d", __FILE__, sr_flag);
+        sys_err_init();
+        sysocbfb(&dcb);
+        return ERR_NONE;
+    }
+
+    rc = sys_tpacall("DFN3100F", &dcb, TPNOREPLY | TPNOTRAN);
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s DFN0030: z100_log_insert() DFLOG sys_tpacall ERR log_type %d", __FILE__, sr_flag);
+        sys_err_init();
+        return ERR_NONE;
+    }
+
 
 }
 
