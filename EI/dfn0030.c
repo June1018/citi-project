@@ -305,10 +305,10 @@ static int e000_msgdf_insert(dfn0030_ctx_t *ctx)
     /* EXMQMSG_DF INSERT                                      */
     /* ------------------------------------------------------ */
     EXEC SQL INSERT INTO EXMQMSG_DF (
-                        PROC_DATE                 /* [8] 처리일자    */
-                      , CHNL_CODE                 /* [3] 채널코드    */
-                      , APPL_CODE                 /* [2] APPL_CODE */
-                      , IO_TYPE                   /* [1] IO_TYPE   */
+                        PROC_DATE                 /*  [8] 처리일자    */
+                      , CHNL_CODE                 /*  [3] 채널코드    */
+                      , APPL_CODE                 /*  [2] APPL_CODE */
+                      , IO_TYPE                   /*  [1] IO_TYPE   */
                       , MSG_ID                    /* [24]메세지ID    */
                       , CORR_ID                   /* [20]CORR ID   */
                       , PROC_TIME                 /*  [6]처리시간    */
@@ -318,9 +318,9 @@ static int e000_msgdf_insert(dfn0030_ctx_t *ctx)
                       , PROC_TYPE                 /*  [1]처리구분    */
                       , ERR_CODE                  /*  [7]에러코드    */
                       , ERR_MSG                   /*[100]에러메세지   */
-                      , MQ_DATE                   /* [8] MQ일자     */
-                      , MQ_TIME                   /* [8] MQ시간     */
-                      , MQLEN                     /* [5] MQ길이     */
+                      , MQ_DATE                   /*  [8] MQ일자     */
+                      , MQ_TIME                   /*  [8] MQ시간     */
+                      , MQLEN                     /*  [5] MQ길이     */
                       , MQMSG                     /* CLOB:MQ메세지   */
                     )VALUES (
                         :exmqmsg_df.proc_date
