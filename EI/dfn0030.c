@@ -432,4 +432,37 @@ SYS_CATCH:
 
 }
 /* ----------------------------------------------------------------------------------------------------------- */
+static int z100_log_insert(dfn0030_ctx_t *ctx, char *log_data, int size, char io_flag, char sr_flag)
+{
+    int                 rc  = ERR_NONE;
+    dfi3100f_t          dfi3100f;
+    commbuff_t          dcb;
+    char                *hp;
+
+    SYS_TRSF;
+    /* ------------------------------------------------------ */
+    SYS_DBG("z100_log_insert: len[%d]"      ,size);
+    SYS_DBG("z100_log_insert: msg[%s]"      ,log_data );
+    SYS_DBG("z100_log_insert: trace_no[%s]" ,ctx->trace_no );
+    SYS_DBG("z100_log_insert: msg_no[%s]"   ,ctx->msg_no   );
+    /* ------------------------------------------------------ */
+
+    memset(&dfi3100f, 0x00, sizeof(dfi3100f_t));
+    dfi3100f.in.io_flag = io_flag;
+    dfi3100f.in.sr_flag = sr_flag; 
+    dfi3100f.in.log_len = size;
+    dfi3100f.in.kti_flag = '1';
+    memcpy(dfi3100f.in.msg_no   , ctx->msg_no   , LEN_DFI0003F_MSG_NO   );
+    memcpy(dfi3100f.in.trace_no , ctx->trace_no , LEN_DFI0003F_TRACE_NO );
+    memcpy(dfi3100f.in.log_data , log_data      , size);
+
+    /* TCP/IP 통신헤더 정보     */
+    hp = sysocbgs(ctx->cb, IDX_TCPHEAD);
+    if (hp != NULL){
+        SYS_DBG("TCP HEAD LOG I")
+    }
+
+}
+
 /* ----------------------------------------------------------------------------------------------------------- */
+/* ---------------------------------------- PROGRAM   END ---------------------------------------------------- */
