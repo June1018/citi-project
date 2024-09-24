@@ -1,7 +1,7 @@
 
-/*  @file               dfn0030.pc
+/*  @file               dfn0040.pc
 *   @file_type          pc source program
-*   @brief              온라인 일괄전송 프로그램 (TCS) 
+*   @brief              온라인 일괄전송 프로그램 (UCS) 
 *   @warn
 *   @author
 *   @version 
