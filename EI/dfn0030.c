@@ -196,7 +196,18 @@ static int c000_tran_code_conv(dfn0030_ctx_t *ctx)
     memset(&exi0251x,   0x00, sizeof(exi0251x_t));
 
     exi0251x.in.tx_flag[0] = '7';
-    
+    exi0251x.in_conv_flag  = 'K';
+    memcpy(exi0251x.in.appl_code   , FCY_CODE      , LEN_APPL_CODE);
+    memcpy(exi0251x.in.msg_type    , ctx->msg_type , LEN_MSG_TYPE );
+    memcpy(exi0251x.in.kftc_tx_code, ctx->proc_code, LEN_KFTC_TX_CODE);
+    exi0251x.in.msg_type_len      = 4;
+    exi0251x.in.kftc_tx_code_len  = 6;
+    exi0251x.in.ext_recv_data     = EXTRECVDATA;    /* 대외수신데이터  set   */
+
+    rc = ex_tran_code_convrt(&exi0251x);
+    if (rc == ERR_ERR) {
+        ex_syslog
+    }
 }
 /* ----------------------------------------------------------------------------------------------------------- */
 /* ----------------------------------------------------------------------------------------------------------- */
