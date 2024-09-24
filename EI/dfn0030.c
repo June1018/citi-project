@@ -487,9 +487,67 @@ static int z100_log_insert(dfn0030_ctx_t *ctx, char *log_data, int size, char io
         sys_err_init();
         return ERR_NONE;
     }
+    
+    sysocbfb(&dcb);
 
+    SYS_TREF;
 
+    return ERR_NONE;
 }
 
 /* ----------------------------------------------------------------------------------------------------------- */
+static int y000_csf_data_insert(dfn0030_ctx_t *ctx)
+{
+    int                 rc     = ERR_NONE;
+    long                urcode = 0;
+    mqput_t             mqput  = {0};
+
+    SYS_TRSF;
+
+    memcpy(mqput.chnl_code  , "007", LEN_EXMQMSG_DF_CHNL_CODE);
+    memcpy(mqput.appl_code  , "06" , LEN_EXMQMSG_DF_APPL_CODE);
+
+    mqput.data_len  = ctx->ext_recv_len;
+    mqput.data      = EXTRECVDATA;
+
+    SYS_DBG("[y000]trace_no[%s]", ctx->trace_no);
+
+    /* csf는 요청 Corr_id 를 고대로 돌려줘야 함     */
+    EXEC SQL
+        SELECT substr(trim(tcp_head), 1, 24)
+          INTO :mqput.corr_id 
+          FROM DFLOG 
+         WHERE PROC_DATE = to_char(sysdate, 'YYYYMMDD')
+           AND IO_FLAG   = 'O'
+           AND SR_FLAG   = '1'
+           AND TRIM(TRACE_NO) = TRIM(:ctx->trace_no)
+           AND ROWNUM    = 1;
+
+    if (SYS_DB_CHK_FAIL){
+        db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s y000_csf_data_insert:원거래없음[%d][%s]", __FILE__, ctx->trace_no, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        SYS_TREF;
+        return ERR_ERR;
+    }
+
+    SYS_DBG("mqput.corr_id[%s]mqput.data[%s]", mqput.corr_id, mqput.data);
+
+    rc = tdlcall2("libeimqput", "eimqput", &mqput, &urcode, 0);
+    if (rc == ERR_ERR){
+        SYS_HSTERR(SYS_LN, SYS_GENERR, "tdlcall(eimqput) failed");
+        return ERR_ERR;
+    }
+    if (urcode == ERR_ERR){
+        return ERR_ERR;
+    }
+
+    rc = z100_log_insert(ctx, EXTRECVDATA, ctx->ext_recv_len, 'O', '4');
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s dfn0030: BB_LOG_ERR() [EI->CSF]", __FILE__);
+    }
+
+    SYS_TREF;
+    return ERR_NONE;
+
+}
 /* ---------------------------------------- PROGRAM   END ---------------------------------------------------- */
