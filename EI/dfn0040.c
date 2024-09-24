@@ -30,100 +30,81 @@
 /* ---------------------------------------------- include files ----------------------------------------------- */
 #include <syscom.h>
 #include <sysconst.h>
-#include <utodate.h>
-#include <exdefine.h>
-#include <dfi0001x.h>
-#include <dfi0002f.h>
-#include <dfi0003f.h>
-#include <dfi3100f.h>
-#include <exi0251x.h>
-#include <exparm.h>
+#include <sytcpgwhead.h>
+#include <usrinc/atmi.h>
+#include <usrinc/ucs.h>
 #include <sqlca.h>
-#include <bssess_stat.h>
-#include <exmqmsg.h>
-#include <mqmsg.h>
+#include <mqi0001f.h>
+#include <cmqc.h>
+#include <exmq.h>
+#include <exmqparm.h>
+#include <exmqmsg_001.h>
+#include <exmqsvc.h>
+
 #include <exmqmsg_df.h>
+#include <unistd.h>
+#include <excommon.h>
+
 #include <hcmihead.h>
 #include <eierrhead.h>
-#include <utoclck.h>
 #include <exmsg11000.h>
+#include <dfi0001x.h>
+#include <exi0251x.h>
+
 /* ---------------------------------------- constant, macro definitions --------------------------------------- */
+#define EXMQPARM                (&ctx->exmqparam)
+#define MQMSG                   (&ctx->exmqpmsg_001)
+#define EXMQMSG_DF              (&ctx->exmqmsg_df)
+
 #define EXMSG11000              (ctx->exmsg11000)
-#define FCY_CODE                "073"
-#define LEN_SIZE                5
+#define LEN_KTIHEAD             300
+#define FCY_APPL_CODE           "073"
 /* ---------------------------------------- structure definitions --------------------------------------------- */
-typedef struct dfn0030_ctx_s dfn0030_ctx_t;
-struct dfn0030_ctx_s {
+typedef struct dfn0040_ctx_s dfn0040_ctx_t;
+struct dfn0040_ctx_s {
+    exmqparm_t          exmqparm;
+    exmqmsg_df_t        exmqmsg_df;
+    exmqmsg_001_t       exmqmsg_001;
+
     commbuff_t   *cb;
+    commbuff_t   _cb;
 
     exmsg11000_t   _exmsg11000;     /* host send 용 structure  */
     exmsg11000_t   *exmsg11000;
 
-    char msg_type           [LEN_DFI0030_MSG_TYPE       + 1];   /* 전문종별코드         */
-    char proc_code          [LEN_DFI0030_PROC_CODE      + 1];   /* 거래구분코드         */
-    char status_code        [LEN_DFI0030_STATUS_CODE    + 1];   /* 상태구분코드         */
-    char rspn_code          [LEN_DFI0030_RSPN_CODE      + 1];   /* 응답   코드         */
-    char rspn_bank_code     [LEN_DFI0030_RSPN_BANK_CODE + 1];   /* 응답코드 부여대표기관 코드 */
-    char proc_date          [LEN_DFI0030_PROC_DATE      + 1];   /* 전문전송일자         */
-    char proc_time          [LEN_DFI0030_PROC_TIME      + 1];   /* 전문전송시간         */
-    char trace_no           [LEN_DFI0030_TRACE_NO       + 1];   /* 전문추적번호         */
-    char recv_filler        [LEN_DFI0030_RECV_FILLER    + 1];   /* 송신자예비정보 필드    */
-    char msg_no             [LEN_DFI0030_MSG_NO         + 1];   /* 거래고유번호           */
-    char trd_data_nm        [LEN_DFI0030_TRD_DATA_NM    + 1];   /* 거래및 결제대사자료 이동  */
-    char div_tot_cnt        [LEN_DFI0030_DIV_TOT_CNT    + 1];   /* 분할된 전문의 총개수     */
-    char div_sr_num         [LEN_DFI0030_DIV_SR_NUM     + 1];   /* 분할된 전문일련 번호     */
-    char filler             [LEN_DFI0030_FILLER         + 1];   /* FILLER              */
-    char trd_comp_len       [LEN_DFI0030_TRD_COMP_LEN   + 1];   /* 거래및 결제 대사자료길이  */
-    char trd_comp_data      [LEN_DFI0030_TRD_COMP_DATA  + 1];   /* 거래및 결제 대사자료DATA */
-    char corr_id            [LEN_DFI0030_CORR_ID        + 1];   /* corr_id             */
-    char host_tx_code       [LEN_DFI0030_TX_CODE        + 1];   /* KTI TX_CODE         */ 
-    char acct_tran_code     [LEN_DFI0030_ACCT_TRAN_CODE + 1];   /* 계좌송금/수취인송금 코드 */
-    char rcv_acct_no        [LEN_DFI0030_ACCT_NO        + 1];   /* 수취계좌번호           */
-    char io_flag; 
-    char kti_flag;          /* 시스템구분 - 0:GCG 1:ICG       */
-    int  ext_recv_len;
-    char ext_recv_data      [11000 + 1];
-    char tmp_tx_code        [LEN_DFI0030_TX_CODE        + 1];   /* temp TX_CODE         */ 
-    char kftc_tx_code       [LEN_DFI0030_TX_CODE        + 1];
-    int  host_err_send;
-    int  csf_flag;
-    int  len;
+
+    char corr_id            [LEN_HCMIHEAD_QUEUE_NAME    + 1];
+    char ext_recv_data      [LEN_EXMSG11000_DETL_AREA   + 1];
+    int  ext_recv_len;    
+    int  recv_len;
 };
 
 /* ------------------------------------- exported global variables definitions -------------------------------- */
 /* ------------------------------------------ exported function  declarations --------------------------------- */
-static int a000_data_receive(dfn0030_ctx_t *ctx, commbuff_t  *commbuff);
-static int b100_init_proc(dfn0030_ctx_t *ctx);
-static int b200_routing_proc(dfn0030_ctx_t *ctx);
-static int c000_tran_code_conv(dfn0030_ctx_t *ctx);
-static int d000_get_corr_id(dfn0030_ctx_t *ctx);
-static int e000_msgdf_insert(dfn0030_ctx_t *ctx);
-static int f000_host_msg_send(dfn0030_ctx_t *ctx);
-static int y000_csf_data_insert(dfn0030_ctx_t *ctx);
-static int z100_log_insert(dfn0030_ctx_t *ctx, char *log_data, int size, char io_flag, char sr_flag);
+static int a000_intial(int argc , char *argv[]);
+static int a100_parse_custom_args(int argc , char *argv[]);
+
+static int get_exmqmsg(dfn0040_ctx_t  *ctx);
+static int update_exmqmsg_status(exmqmsg_df_t  *exmqmsg_df, long proc_type);
+static int kti_msg_send(dfn0040_ctx_t  *ctx);
 /* ----------------------------------------------------------------------------------------------------------- */
-/* host receive 부터 host(sna)send 전 까지 업무 처리                                                                */
 /* ----------------------------------------------------------------------------------------------------------- */
-int dfn0030(commbuff_t  *commbuff)
+int dfn0040(commbuff_t  *commbuff)
 {
-    int                 rc = ERR_NONE;
-    dfn0030_ctx_t   _ctx;
-    dfn0030_ctx_t   *ctx = &_ctx;
+    int             rc = ERR_NONE;
+    int             i;
+    char            *cp;
+    char            *hp;
 
     SYS_TRSF;
-    /* 데이터 수신              */
-    SYS_TRY(a000_data_receive(ctx, commbuff));
-    /* 초기화 처리              */
-    SYS_TRY(b100_init_proc(ctx));
-    /* 대외기관수신 거래코드 -> host 거래코드 변환       */
-    SYS_TRY(c000_tran_code_conv(ctx));
-    /* corr_id 채번            */
-    SYS_TRY(d000_get_corr_id(ctx));
-    /* EXMQMSG_DF INSERT      */
-    SYS_TRY(e000_msgdf_insert(ctx));
-    /* HOST 전문 전송           */
-    SYS_TRY(f000_host_msg_send(ctx));
 
+    SYS_DBG("====================== DFN0040 START ====================================")
+    /* MQ Initialization 초기화 처리              */
+    SYS_DBG(" call #1 ------------------------------------------------------");
+    PRINT_EXMQPARM(g_mqi000f.in.exmqparam);
+
+
+    SYS_DBG("====================== DFN0040   END ====================================")
     SYS_TREF;
 
     return ERR_NONE;
@@ -136,97 +117,106 @@ SYS_CATCH:
     return ERR_ERR;
 }
 /* ----------------------------------------------------------------------------------------------------------- */
-static int a000_data_receive(dfn0030_ctx_t *ctx, commbuff_t  *commbuff)
+static int a000_intial(int argc , char *argv[]);
 {
     int                 rc  = ERR_NONE;
 
     SYS_TRSF;
-    /* set commbuff      */
-    memset((char *)ctx, 0x00, sizeof(dfn0030_ctx_t));
-    ctx->cb = commbuff;
 
-    SYS_ASSERT(EXTRECVDATA);
-
-    /* input channel clear */
-    SYSICOMM->intl_tx_flag = 0;
-    memset(SYSICOMM->call_svc_name, 0, sizeof(SYSICOMM->call_svc_name));
-    memcpy(SYSICOMM->call_svc_name, "DFN0030", 7);
-
-    /* 11000메세지          */
-    ctx->exmqmsg11000 = &ctx->_exmsg11000;
-
-    SYS_DBG("EXTRECVDATA[%d][%.*s]", sysocbgs(ctx->cb, IDX_EXTRECVDATA), sysocbgs(ctx->cb, IDX_EXTRECVDATA), EXTRECVDATA);
-
-    SYS_TREF;
-
-    return ERR_NONE;    
-}
-/* ----------------------------------------------------------------------------------------------------------- */
-static int b100_init_proc(dfn0030_ctx_t *ctx)
-{
-    int                 rc  = ERR_NONE;
-    char                temp_str[LEN_EXMSG11000_DETL_REC_SIZE + 1];
-    char                cati_target[1+1];
-    char                msg_type[2];
-
-    exmqmsg11000_t      exmqmsg11000;
-
-    SYS_TRSF;
-    /* 전문길이 set       */
-    memset(temp_str, 0x00, LEN_EXMSG11000_DETL_REC_SIZE + 1);
-    utol2an( (int)sysocbgs(ctx->cb, IDX_EXTRECVDATA), LEN_EXMSG11000_DETL_REC_SIZE, temp_str);
-
-    memcpy(EXMSG11000->detl_rec_size    , temp_str    , LEN_EXMSG11000_DETL_REC_SIZE);
-    memcpy(&EXMSG11000->detl_area       , EXTRECVDATA , sysocbgs(ctx->cb, IDX_EXTRECVDATA));
-    ctx->ext_recv_len = sysocbgs(ctx->cb, IDX_EXTRECVDATA);
-
+    SYS_TRY(a100_parse_custom_args(argc, argv));
     SYS_TREF;
 
     return ERR_NONE;
+SYS_CATCH:
 
+    SYS_DBG("SYS_CATCH");
+
+    SYS_TREF;
+    return ERR_ERR;    
 }
 /* ----------------------------------------------------------------------------------------------------------- */
-static int c000_tran_code_conv(dfn0030_ctx_t *ctx)
+static int a100_parse_custom_args(int argc , char *argv[])
 {
-    int                 rc  = ERR_NONE;
-    dfi0003f_t          dfi0003f;
-    exi0251x_t          exi0251x;
+    int                 c;
+    
+    g_sleep_sec         = 1;
 
-    SYS_TRSF;
-    memset(&exi0251x,   0x00, sizeof(exi0251x_t));
+    memset(g_chnl_code, 0x00, sizeof(g_chnl_code));
+    memset(g_appl_code, 0x00, sizeof(g_appl_code));
 
-    exi0251x.in.tx_flag[0] = '7';
-    exi0251x.in_conv_flag  = 'K';
-    memcpy(exi0251x.in.appl_code   , FCY_CODE      , LEN_APPL_CODE);
-    memcpy(exi0251x.in.msg_type    , ctx->msg_type , LEN_MSG_TYPE );
-    memcpy(exi0251x.in.kftc_tx_code, ctx->proc_code, LEN_KFTC_TX_CODE);
-    exi0251x.in.msg_type_len      = 4;
-    exi0251x.in.kftc_tx_code_len  = 6;
-    exi0251x.in.ext_recv_data     = EXTRECVDATA;    /* 대외수신데이터  set   */
+    while((c = getopt(argc, argv, "s:c:a: ")) != EOF){
+        /* ---------------------------------------------------- */
+        SYS_DBG("GETOPT: -%c/n",   c);
+        /* ---------------------------------------------------- */
 
-    rc = ex_tran_code_convrt(&exi0251x);
-    if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s c000_tran_code_conv(): "
-                             "거래코드 변환 ERROR : tx_code[%s] kftc_tx_code[%s]"
-                             "code/msgp[%d][%s]",
-                             __FILE__, ctx->msg_type, ctx->kftc_tx_code,
-                             sys_error_code(), sys_error_msg());
-        return ERR_ERR;
+        switch(c){
+        case 'c':
+            strcpy(g_chnl_code, optarg);
+            break;
+
+        case 'a':
+            strcpy(g_appl_code, optarg);
+            break;
+
+        case '?':
+            SYS_DBG("unrecognized option : - %c %s ",optopt, argv[optind]);
+            return ERR_ERR;
+        }
     }
-    /* 거래파라미터 LOAD이후 오류 발생시 HOST로 오류 문자 전송      */
-    ctx->host_err_send = 1;
-    memcpy(ctx->host_tx_code,   exi0251x.out.tx_code, LEN_TX_CODE);
-    SYS_DBG("c000_tran_code_conv :tx_code[%s]tx_name[%s]", exi0251x.out.tx_code, exi0251x.out.tx_name);
 
-    /* ------------------------------------------------------ */
-    SYS_DBG("[c000]host_tx_code[%s]", ctx->host_tx_code);
-    /* ------------------------------------------------------ */
+    /* ----------------------------------------------------------------------------- */
+    SYS_DBG("g_chnl_code[%s]", g_chnl_code);
+    SYS_DBG("g_appl_code[%s]", g_appl_code);
+    SYS_DBG("g_sleep_sec[%d]", g_sleep_sec);
+    /* ----------------------------------------------------------------------------- */
+
     SYS_TREF;
+
+    return ERR_NONE;
+
+}
+/* ----------------------------------------------------------------------------------------------------------- */
+int usermain(int argc, char *argv[])
+{
+    int                 rc  = ERR_NONE;
+    int                 cnt = 0;
+    dfn0040_ctx_t       _ctx = {0};
+    dfn0040_ctx_t       *ctx = &_ctx;
+    exmsg11000_t        exmsg11000;
+    
+    ctx->cb = &ctx->_cb;
+    ctx->exmsg11000 = &ctx->_exmsg11000;
+    memset(ctx->exmsg11000, 0x20, sizeof(exmsg11000_t));
+
+    rc = a000_data_init(argc, argv);
+    if (rc == ERR_ERR)
+        tpsvrdown();
+
+SYS_DBG("=========================== USER MAIN START ================================================= ");
+
+    while(1){
+        if (get_exmqmsg(ctx) == ERR_NONE){
+            tpschedule(10);     /* 10sec 한번씩 체크    */
+        }else if (get_exmqmsg(ctx) == ERR_ERR){
+            tpschedule(60);     /* 60sec 한번씩 체크    */
+            continue;
+
+            if (g_db_err == 0){
+               tpschedule(g_sleep_sec);
+            }
+
+            if (cnt++ > 100){
+                SYS_DBG("no data sleep");
+                cnt = 0;
+            }
+        }
+    }
+SYS_DBG("=========================== USER MAIN  END  ================================================= ");
 
     return ERR_NONE;
 }
 /* ----------------------------------------------------------------------------------------------------------- */
-static int d000_get_corr_id(dfn0030_ctx_t *ctx)
+static int d000_get_corr_id(dfn0040_ctx_t *ctx)
 {
     int                 rc  = ERR_NONE;
     char                corr_id[LEN_HCMIHEAD_QUEUE_NAME + 1], buff[LEN_HCMIHEAD_DATA_LEN + 1];
@@ -263,7 +253,7 @@ static int d000_get_corr_id(dfn0030_ctx_t *ctx)
 
 }
 /* ----------------------------------------------------------------------------------------------------------- */
-static int e000_msgdf_insert(dfn0030_ctx_t *ctx)
+static int e000_msgdf_insert(dfn0040_ctx_t *ctx)
 {
     int                 rc  = ERR_NONE;
     char                buff[LEN_SIZE+1];
@@ -363,7 +353,7 @@ SYS_CATCH:
 
 }
 /* ----------------------------------------------------------------------------------------------------------- */
-static int f000_host_msg_send(dfn0030_ctx_t *ctx)
+static int f000_host_msg_send(dfn0040_ctx_t *ctx)
 {
     int                 rc  = ERR_NONE;
     char                log_data[5000+1];
@@ -432,7 +422,7 @@ SYS_CATCH:
 
 }
 /* ----------------------------------------------------------------------------------------------------------- */
-static int z100_log_insert(dfn0030_ctx_t *ctx, char *log_data, int size, char io_flag, char sr_flag)
+static int z100_log_insert(dfn0040_ctx_t *ctx, char *log_data, int size, char io_flag, char sr_flag)
 {
     int                 rc  = ERR_NONE;
     dfi3100f_t          dfi3100f;
@@ -496,7 +486,7 @@ static int z100_log_insert(dfn0030_ctx_t *ctx, char *log_data, int size, char io
 }
 
 /* ----------------------------------------------------------------------------------------------------------- */
-static int y000_csf_data_insert(dfn0030_ctx_t *ctx)
+static int y000_csf_data_insert(dfn0040_ctx_t *ctx)
 {
     int                 rc     = ERR_NONE;
     long                urcode = 0;
