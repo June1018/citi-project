@@ -1,7 +1,7 @@
 
-/*  @file               dfn0010.pc
+/*  @file               dfn0011.pc
 *   @file_type          pc source program
-*   @brief              외화자금이체 (FCY_DFT)개설요청 메인 
+*   @brief              외화자금이체 (FCY_DFT)개설응답 메인 
 *   @warn
 *   @author
 *   @version 
