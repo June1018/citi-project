@@ -341,6 +341,37 @@ static int d000_jrn_insert(dfn0010_ctx_t *ctx)
 }
 /* ----------------------------------------------------------------------------------------------------------- */
 static int k000_host_msg_send(dfn0010_ctx_t *ctx)
+{
+    int                 rc  = ERR_NONE;
+    int                 len = 0;
+    char                corr_id[LEN_HCMIHEAD_QUEUE_NAME + 1];
+
+    hcmihead_t          hcmihead;
+
+    /* init hcmihead    */
+    memset(corr_id, 0x00, sizeof(corr_id));
+
+    utocick(corr_id);
+
+    memcpy(ctx->corr_id, corr_id, LEN_HCMIHEAD_QUEUE_NAME);
+    memset(&hcmihead,   0x20, sizeof(hcmihead_t));
+    /* set hcmihead     */
+    memcpy(hcmihead.queue_name, ctx->corr_id       , LEN_HCMIHEAD_QUEUE_NAME);
+    memcpy(hcmihead.tx_code   , ctx->host_tx_code  , LEN_HCMIHEAD_TX_CODE   );
+    memcpy(hcmihead.data_len  , EXMSG11000->detl_rec_size, LEN_HCMIHEAD_DATA_LEN);
+    memcpy(hcmihead.resp_code , "000"              , LEN_HCMIHEAD_RESP_CODE );
+
+    ctx->recv_len = utoa2in(EXMSG11000->detl_rec_size, LEN_HCMIHEAD_DATA_LEN);
+
+    rc = sysocbsi(ctx->cb, IDX_TCPHEAD, &hcmihead, sizeof(hcmihead_t));
+    rc = sysocbsi(ctx->cb, IDX_HOSTSENDDATA, EXMSG11000->detl_area, ctx->recv_len);
+    if (rc == ERR_ERR){
+        SYS_HSTERR(SYS_LN, SYS_GENERR, "COMMBUFF SET ERR");
+        return ERR_ERR;
+    }
+
+}
+
 /* ----------------------------------------------------------------------------------------------------------- */
 static int k100_kti_msg_send(dfn0010_ctx_t *ctx)
 {
