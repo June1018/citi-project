@@ -109,73 +109,78 @@ static int c000_data_send_proc(dfi0004f_t  *dfi0004f, dfo0004f_ctx_t  *ctx)
     char                temp_buff   [LEN_DFI0004F_SEND_DATA + 1]; //MT103 swift data 11000 size
     char                temp_acct_no[LEN_DFI0004F_ACCT_NO   + 1]; //수취계좌번호 
     char                temp_currency[LEN_DFI0004F_CURRENCY + 1]; //거래통화 
-    int                 int  len;
+    int                 len;
+    int                 i = 0, j = 0;
+    int                 chk = 0;
+    char                *inpt_stream;
+    char                *p;
 
-
-
-
-    
     SYS_TRSF;
 
-    utotrim(dfi0004f->in.brn_no);
-    /*-----------------------------------------------------------*/
-    /* EXBRN    SELECT                                           */
-    /*-----------------------------------------------------------*/        
-    EXEC SQL SELECT ICG_BRN_FLAG
-                INTO :dfi0004f->out.kti_flag
-                FROM EXBRN
-               WHERE INST_NO  = '027'
-                 AND BRN_NO   = :dfi0004f->in.brn_no
-                 ;
-    if (SYS_DB_CHK_NOTFOUND) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s EXBRN SELECT %d "
-                             "[해결방안] 외화자금이체 담당자 call MSG[%s]"
-                             __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);        
-        memcpy(dfi0004f->out.kti_flag,  "0", LEN_DFI0003F_KTI_FLAG);
-        return ERR_NONE;
-    }else if (SYS_DB_CHK_FAIL){
-        db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s EXBRN SELECT %d "
-                             "[해결방안] 외화자금이체 담당자 call MSG[%s]"
-                             __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);        
-        ex_syslog(LOG_FATAL, "[APPL_DM] %s EXBRN SELECT %d "
-                             "[해결방안] 외화자금이체 담당자 call MSG[%s]"
-                             __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);        
-        SYS_HSTERR(SYS_NN, SYS_GENERR, "EXBRN SELECT ERROR");
-        //return ERR_ERR;
+    memset(mt103_text,    0x00, sizeof(mt103_text));
+    memset(temp_currency, 0x00, sizeof(temp_currency));
+    memset(temp_acct_no , 0x00, sizeof(temp_acct_no))
+
+    memcpy(mt103_text, dfi0004f->in.ext_send_data, LEN_DFI0004F_SEND_DATA);
+    inpt_stream = mt103_text;
+
+    for ( i = 0; i <= strlen(mt103_text); i++){
+        temp_buff[j++] = inpt_stream[i];
+
+        /* new line check */
+        if (inpt_stream[i] == '\n'){
+            
+            if (memcmp(temp_buff, ":32A:", 5) == 0){
+                SYS_DBG("c000_data_send_proc(32A) temp_buff[%s]", temp_buff);
+                memcpy(temp_currency, temp_buff+11, LEN_DFI0004F_CURRENCY);     /* 6!3!a15d 결제일(YYYYMMDD),해단통화, 금액     */
+                memset(dfi0004f->out.currency, 0x00, sizeof(dfi0004f->out.currency));
+                memcpy(dfi0004f->out.currency, temp_currency, LEN_DFI0004F_CURRENCY);
+                SYS_DBG("c000_data_send_proc #2 CURRENCY[%s]", dfi0004f->out.currency);
+            }
+
+            if (memcmp(temp_buff, ":59:/", 5) == 0){
+                memcpy(temp_acct_no, temp_buff+5,   LEN_DFI0004F_ACCT_NO);
+                memcpy(ctx->temp_rcv_acct_no, temp_acct_no, LEN_DFI0004F_ACCT_NO);
+                SYS_DBG("c000_data_send_proc #2 acct_no[%s]", ctx->temp_rcv_acct_no);
+            }
+
+            memset(temp_buff,   0x00, sizeof(temp_buff));
+            j++;
+        }
     }
 
     SYS_TREF;
 
     return ERR_NONE;
 
-
 }
 /* ----------------------------------------------------------------------------------------------------------- */
 static int c200_isdigit_char(dfi0004f_t  *dfi0004f, dfo0004f_ctx_t  *ctx)
 {
-    int                 rc = ERR_NONE;
-    char                ext_send_data[LEN_DFI0004F_SEND_DATA + 1];  /* 대외수신데이터 */
+    char                *str;
+    char                buff[20] = {0,};
+    int                 i = 0;
 
-    dfi0004f_t          dfi0004f;
 
     SYS_TRSF;
-    memset(&dfi0004f, 0x00, sizeof(dfi0004f_t));
-    memset(ext_send_data, 0x00, sizeof(ext_send_data));
+    
+    strcpy(str,  ctx->temp_rcv_acct_no);
 
-    memcpy(ext_send_data, dfi0004f->in.ext_send_data, LEN_DFI0003F_SEND_DATA);
-    memcpy(dfi0004f.in.ext_send_data, ext_send_data , LEN_DFI0003F_SEND_DATA);
-
-    rc = df_swift_parse(&dfi0004f);
-    if (rc == ERR_ERR){
-        ex_syslog(LOG_FATAL, "[APPL_DM] %s df_swift_parse(dfi0004f) ERR: ext_send_data[%s]", __FILE__, ext_send_data);
-        SYS_HSTERR(SYS_NN, SYS_GENERR, "DF_SWIFT_PARSE ERROR");
-        //return ERR_ERR;
+    while(*str)
+    {
+        if (isdigit(*str))
+        {
+            buff[i++] = *str;
+        }
+        str++;
     }
-    memcpy(ctx->currency,    dfi0004f.out.currency   , LEN_DFI0004F_CURRENCY);
-    memcpy(ctx->fcy_acct_no ,dfi0004f.out.rcv_acct_no, LEN_DFI0004F_ACCT_NO );
-    utotrim(ctx->fcy_acct_no);
-    SYS_DBG("[b200]df_swift_parse #2 currency[%s]fcy_acct_no[%s]", ctx->currency, ctx->fcy_acct_no);
+
+    SYS_DBG("c200_isdigit_char: buff[%s]", buff);
+
+    memset(dfi0004f->out.rcv_acct_no, 0x00, LEN_DFI0004F_ACCT_NO);
+    memcpy(dfi0004f->out.rcv_acct_no, buff, LEN_DFI0004F_ACCT_NO);
+
+    SYS_DBG("c200_isdigit_char: dfi0004f->out.rcv_acct_no[%s]", dfi0004f->out.rcv_acct_no);
 
     SYS_TREF;
 
