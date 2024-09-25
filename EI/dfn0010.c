@@ -370,6 +370,22 @@ static int k000_host_msg_send(dfn0010_ctx_t *ctx)
         return ERR_ERR;
     }
 
+    SYSGWINFO->time_val     = SYSGWINFO_SAF_DFLT_TIMEOUT;
+    SYSGWINFO->msg_type     = SYSGWINFO_MSG_1500;
+    SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_IR;
+    SYSGWINFO->rspn_flag    = SYSGWINFO_SVC_REPLY;    
+
+    /* Forex MQ MSG SEND    */
+    rc - sys_tpcall("SYMQSEND_DFF", ctx->cb, TPNOTRAN);
+    if ( rc == ERR_ERR){
+        ex_syslog(LOG_FATAL, "[APPL_DM] %.7s dfn0010(FOREX21)- MQ MSG SEND ERROR %d [해결방안]HOST G/W 담당자 call",
+                            __FILE__, tperrno);
+        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s dfn0010(FOREX21)- k000_host_msg_send ERROR %d [해결방안]HOST G/W 담당자 call",
+                            __FILE__, tperrno);
+        if (ctx->mgr_flag[0] == '1'){
+            memset(ctx->kti_flag, 0x00, sizeof(ct))
+        }
+    }
 }
 
 /* ----------------------------------------------------------------------------------------------------------- */
