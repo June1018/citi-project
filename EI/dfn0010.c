@@ -383,126 +383,97 @@ static int k000_host_msg_send(dfn0010_ctx_t *ctx)
         ex_syslog(LOG_ERROR, "[APPL_DM] %.7s dfn0010(FOREX21)- k000_host_msg_send ERROR %d [해결방안]HOST G/W 담당자 call",
                             __FILE__, tperrno);
         if (ctx->mgr_flag[0] == '1'){
-            memset(ctx->kti_flag, 0x00, sizeof(ct))
+            /* 관리전문 KTI tx_code get하기위해서 kti_flag set      */
+            memset(ctx->kti_flag, 0x00, sizeof(ctx->kti_flag));
+            ctx->kti_flag[0] = '1';
+            SYS_DBG("[k000]mgr_flag[%s]kti_flag[%s]",ctx->mgr_flag, ctx->kti_flag);
+            //return ERR_ERR;   20240715 요청사항 관리전문 Forex21/KTI 한쪽 gw문제가 생겨도 다른쪽에 영향없어야 한다. 
+        }else{
+            return ERR_ERR;
         }
     }
+    rc = z100_log_insert(ctx, (char *)EXTRECVDATA, sysocbgs(ctx->cb, IDX_EXTRECVDATA), 'I', '2');   /* 개설요청 :I sr_flag: 2[EI->PP]   */
+
+    if (ctx->mgr_flag[0] == '1'){
+        /* 관리전문 KTI(tx_code) set :mgr_flag[%s]ctx->kti_flag[%s]*/
+        memset(ctx->kti_flag,   0x00, sizeof(ctx->kti_flag));
+        ctx->kti_flag[0] = '1';
+        SYS_DBG("관리전문 KTI(tx_code) set :mgr_flag[%s]ctx->kti_flag[%s]", ctx->mgr_flag, ctx->kti_flag);
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
 }
 
 /* ----------------------------------------------------------------------------------------------------------- */
 static int k100_kti_msg_send(dfn0010_ctx_t *ctx)
 {
     int                 rc  = ERR_NONE;
-    int                 len;
+    char                corr_id[LEN_HCMIHEAD_QUEUE_NAME + 1];
     char                data_len[LEN_HCMIHEAD_DATA_LEN];
-    char                detl_rec_size[LEN_EXMSG1500_DETL_REC_SIZE];
-    char                msg_type[LEN_MSG_TYPE];
-    char                proc_code[LEN_KFTC_TX_CODE];
-
-    commbuff_t          dcb;
-    exi0251x_t          exi0251x;
+    int                 len, len2;
     hcmihead_t          hcmihead;
-    sysgwinfo_t         *sysgwinfo;
+    eierrhead_t         eierrhead;
     dfi0001x_t          dfi0001x;
 
-    SYS_TRSF;
-
     memset(&dfi0001x,   0x20, sizeof(dfi0001x_t));
-    memset(&hcmihead,   0x20, sizeof(hcmihead_t));
-    memset(data_len,    0x00, sizeof(data_len));
-    memset(msg_type,    0x00, sizeof(msg_type));
-    memset(proc_code,   0x00, sizeof(proc_code));
-
     dfi0001x.in.exmsg11000 = EXMSG11000;
     df_proc_exmsg11000_init(&dfi0001x);
 
-    memcpy(&EXMSG11000->detl_area,  ctx->ext_recv_data, ctx->ext_recv_len);
-    memcpy(data_len,      &EXMSG11000->detl_area[4] , LEN_HCMIHEAD_DATA_LEN);
-    memcpy(detl_rec_size, &EXMSG11000->detl_area[5] , LEN_EXMSG1500_DETL_REC_SIZE);
-    
-    memcpy(msg_type,      &EXMSG11000->detl_area[12], LEN_MSG_TYPE);
-    memcpy(proc_code,     &EXMSG11000->detl_area[16], LEN_KFTC_TX_CODE);
-    SYS_DBG("ex_tran_code_convrt : msg_type[%s]proc_code[%s]",msg_type , proc_code);
+    /* init hcmihead    */
+    memset(corr_id, 0x00, sizeof(corr_id));
+    utocick(corr_id);
+    memset(ctx->corr_id, 0x00, sizeof(corr_id));
+    /* set hcmihead     */
+    memset(&hcmihead,    0x20, sizeof(hcmihead_t));
+    memcpy(hcmihead.queue_name, ctx->corr_id      , LEN_HCMIHEAD_QUEUE_NAME);
 
-    memset(&exi0251x, 0x00, sizeof(exi0251x_t));
-    exi0251x.in.tx_flag[0] = '7';
-    exi0251x.in_conv_flag  = 'K';
-    memcpy(exi0251x.in.appl_code   , FCY_APPL_CODE , LEN_APPL_CODE);
-    memcpy(exi0251x.in.msg_type    , msg_type      , LEN_MSG_TYPE );
-    memcpy(exi0251x.in.kftc_tx_code, proc_code     , LEN_KFTC_TX_CODE);
+    memcpy(hcmihead.tx_code   , ctx->host_tx_code , LEN_HCMIHEAD_TX_CODE   );
+    memcpy(EXMSG10000->tx_code, ctx->host_tx_code , LEN_HCMIHEAD_TX_CODE   );
 
-    exi0251x.in.msg_type_len      = 4;
-    exi0251x.in.kftc_tx_code_len  = 6;
-    exi0251x.in.ext_recv_data     = EXMSG11000->detl_area;    /* 대외수신데이터  set   */
-
-    rc = ex_tran_code_convrt(&exi0251x);
-    if (rc == ERR_ERR) {
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s c000_tran_code_conv(): "
-                             "거래코드 변환 ERROR : tx_code[%s] kftc_tx_code[%s]"
-                             "code/msgp[%d][%s]",
-                             __FILE__, ctx->msg_type, ctx->kftc_tx_code,
-                             sys_error_code(), sys_error_msg());
-        return ERR_ERR;
-    }
-    
-    SYS_DBG("[kti_msg_send]hcmihead : tx_code[%s]tx_name[%d]", exi0251x.out.tx_code, exi0251x.out.tx_name);
-    memcpy(hcmihead.queue_name, ctx->corr_id        , LEN_HCMIHEAD_QUEUE_NAME);
-    memcpy(hcmihead.tx_code   , exi0251x.out.tx_code, LEN_HCMIHEAD_TX_CODE);
+    //len = LEN_HCMIHEAD + LEN_EIERRHEAD + ctx->recv_len;
+    len = LEN_HCMIHEAD + ctx->recv_len;
     memset(data_len, 0x20, sizeof(data_len));
-    sprintf(data_len, "%5d", ctx->ext_recv_len + LEN_KTIHEAD + LEN_EIERRHEAD);
-    SYS_DBG("[kti_msg_send]hcmihead : data_len[%s]ext_recv_len[%d]",data_len ,ctx->ext_recv_len);
+    sprintf(data_len, "%05d",   len);
+    utotrim(data_len);
+    SYS_DBG("k100_kti_msg_send #1 data_len[%s]recv_len[%d]", data_len, ctx->recv_len );
 
-    memcpy(hcmihead.data_len, data_len,  LEN_HCMIHEAD_DATA_LEN);
+    memcpy(hcmihead.data_len,   data_len , LEN_HCMIHEAD_DATA_LEN );
 
 #ifdef  _DEBUG
-    PRINT_HCMIHEAD(&hcmihead);
+    //PRINT_HCMIHEAD(&hcmihead);
 #endif
+    SYS_DBG("EXMSG11000[KTI][%d][%s]",  sysocbgs(ctx->cb, IDX_HOSTSENDDATA), EXMSG11000);
 
-    memcpy(EXMSG11000->tx_code, exi0251x.tx_code, LEN_EXMSG11000_TX_CODE);
-    memcpy(&EXMSG11000->detl_area, ctx->ext_recv_data, ctx->ext_recv_len);
-    memcpy(dfi0001x.in.exmsg11000->detl_area, EXMSG11000->detl_area, ctx->ext_recv_len);
-
-    rc = sysocbsi(ctx->cb, IDX_TCPHEAD, &hcmihead,  sizeof(hcmihead_t));
-    rc = sysocbsi(ctx->cb, IDX_HOSTSENDDATA, dfi0001x.exmsg11000, ctx->ext_recv_len + LEN_KTIHEAD + LEN_EIERRHEAD + LEN_HCMIHEAD);  /* 전제 전송길이 : hcmihead (72) EIERRHEAD (200) KTIHEAD (300) 전문데이터(ext_recv_len) */
+    rc = sysocbsi(ctx->cb, IDX_TCPHEAD, &hcmihead, sizeof(hcmihead_t));
+    rc = sysocbsi(ctx->cb, IDX_HOSTSENDDATA, EXMSG11000, len);
     if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s kti_msg_send(): "
-                           , "COMMBUFF(HOSTSENDDATA) set error"
-                           ,"[해결방안]일괄전송 담당자 call" ,
-                           __FILE__);
+        SYS_HSTERR(SYS_LN, SYS_GENERR, "COMMBUFF SET ERR");
         return ERR_ERR;
     }
 
-    memset(&dcb, 0x00, sizeof(commbuff_t));
-    rc = sysocbdb(ctx->cb, &dcb);
-    if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s dfn0040: kti msg send(dcb)"
-                             "COMMBUFF BACK UP ERROR "
-                             "[해결방안] TMAX 담당자 call", __FILE__);
-        sysocbfb(&dcb);
-        return ERR_ERR;
+    SYSGWINFO->time_val     = SYSGWINFO_SAF_DFLT_TIMEOUT;
+    SYSGWINFO->msg_type     = SYSGWINFO_MSG_1500;
+    SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_IR;
+    SYSGWINFO->rspn_flag    = SYSGWINFO_SVC_REPLY;    
+
+    /* KTI MQ MSG SEND    */
+    rc - sys_tpcall("SYMQSEND_DFK", ctx->cb, TPNOTRAN);
+    if ( rc == ERR_ERR){
+        ex_syslog(LOG_FATAL, "[APPL_DM] %.7s dfn0010(KTI)- MQ MSG SEND ERROR %d [해결방안]HOST G/W 담당자 call",
+                            __FILE__, tperrno);
+        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s dfn0010(KTI)- k100_kti_msg_send() ERROR %d [해결방안]HOST G/W 담당자 call",
+                            __FILE__, tperrno);
+
+        if (ctx->mgr_flag[0] == '1'){
+            SYS_DBG("[k100]mgr_flag[%s]",ctx->mgr_flag);
+            //return ERR_ERR;   20240715 요청사항 관리전문 Forex21/KTI 한쪽 gw문제가 생겨도 다른쪽에 영향없어야 한다. 
+        }else{
+            return ERR_ERR;
+        }
     }
-
-    /* SYMQSEND_DFK 또는 KTI 필요한 값 체크         */
-    sysgwinfo = (sysgwinfo_t *) sysocbgp(&dcb, IDX_SYSGWINFO);
-    if (sysgwinfo != NULL){
-        sysgwinfo->time_val     =  60;
-        sysgwinfo->msg_type     = SYSGWINFO_MSG_1500;
-        sysgwinfo->call_type    = SYSGWINFO_CALL_TYPE_IR;
-        sysgwinfo->rspn_flag    = SYSGWINFO_SVC_REPLY;
-    }
-
-    SYS_DBG("HOSTSENDDATA[%d][%.*s]", sysocbgs(ctx->cb, IDX_HOSTSENDDATA), sysocbgs(ctx->cb, IDX_HOSTSENDDATA),  HOSTSENDDATA);
-
-    rc = sys_tpcall("SYMQSEND_DFK", &dcb, TPNOTRAN);
-    if (rc == ERR_ERR){
-        ex_syslog(LOG_ERROR, "[APPL_DM] %s dfn0040 kti msg send()"
-                             "ERROR %d [해결방안] HOST G/W 담당자call",
-                             __FILE__, tperrno);
-        sysocbfb(&dcb);
-        //return ERR_ERR;
-    }
-    update_exmqmsg_status(EXMQMSGDF, 9L);
-
-    sysocbfb(&dcb);
+    rc = z100_log_insert(ctx, (char *)EXTRECVDATA, sysocbgs(ctx->cb, IDX_EXTRECVDATA), 'I', '2');   /* 개설요청 :I sr_flag: 2[EI->PP]   */
     
     SYS_TREF;
 
