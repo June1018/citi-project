@@ -80,7 +80,7 @@ struct dfn0010_ctx_s {
     int                 recv_len;                                          /* 수신길이         */
     int                 send_len;                                          /* 대외기관 전송길이  */
     char                mt103_text     [LEN_MT103 + 1];                    /* swift mt103 최대길이 11000 */
-
+};
 /* ------------------------------------------ exported function  declarations --------------------------------- */
 static int a000_data_receive(dfn0010_ctx_t  *ctx, commbuff_t  *commbuff);
 static int b100_init_proc(dfn0010_ctx_t *ctx);
@@ -500,7 +500,7 @@ static int z100_log_insert(dfn0010_ctx_t *ctx), char *log_data, int size, char i
     dfi3100f.in.io_flag = io_flag;
     dfi3100f.in.sr_flag = sr_flag; 
     dfi3100f.in.log_len = size;
-    dfi3100f.in.kti_flag = '1';
+    dfi3100f.in.kti_flag = ctx->kti_flag;
     memcpy(dfi3100f.in.msg_no   , ctx->msg_no   , LEN_DFI0003F_MSG_NO   );
     memcpy(dfi3100f.in.trace_no , ctx->trace_no , LEN_DFI0003F_TRACE_NO );
     memcpy(dfi3100f.in.log_data , log_data      , size);
