@@ -356,10 +356,106 @@ static int c000_df_jrn_upd(dfo0002f_ctx_t  *ctx, dfi0002f_t  *dfi0002f)
 {
 
     int                 rc = ERR_NONE;
+
+    SYS_TRSF;
+    SYS_DBG("c000_df_jrn_upd #1 ======================================= ");
+    SYS_DBG("c000_df_jrn_upd : proc_date[%s]", dfi0002f->in.proc_date    );
+    SYS_DBG("c000_df_jrn_upd : msg_no   [%s]", dfi0002f->in.msg_no       );
+    SYS_DBG("c000_df_jrn_upd #2 ======================================= ");
+    SYS_DBG("c000_df_jrn_upd : tx_code  [%s]", dfi0002f->in.tx_code      );
+    SYS_DBG("c000_df_jrn_upd : msg_type [%s]", dfi0002f->in.msg_type     );
+    SYS_DBG("c000_df_jrn_upd : proc_code[%s]", dfi0002f->in.proc_code    );
+    SYS_DBG("c000_df_jrn_upd : io_flag  [%s]", dfi0002f->in.io_flag      );
+    SYS_DBG("c000_df_jrn_upd : trace_no [%s]", dfi0002f->in.trace_no     );
+    SYS_DBG("c000_df_jrn_upd : rspn_code[%s]", dfi0002f->in.rspn_coe     );
+    SYS_DBG("c000_df_jrn_upd : corr_id  [%s]", dfi0002f->in.corr_id      );
+
+    /*-------------------------------------------------------------------*/
+    utotime1(dfi0002f->in.proc_time);
+    SYS_DBG("c000_df_jrn_upd: proc_time[%s]", dfi0002f->in.proc_time );
+
+    /*-------------------------------------------------------------------*/
+    /* DFJRN UPDATE                                                      */
+    /*-------------------------------------------------------------------*/
+    EXEC SQL UPDATE DFJRN 
+                SET IO_FLAG      = :dfi0002f->in.io_flag 
+                  , TRACE_NO     = :dfi0002f->in.trace_no 
+                  , RSPN_CODE    = :dfi0002f->in.rspn_code 
+                  , CORR_ID      = :dfi0002f->in.corr_id
+                  , KTI_FLAG     = :dfi0002f->in.kti_flag
+                  , PROC_TIME    = :dfi0002f->in.proc_time
+              WHERE PROC_DATE    = :dfi0002f->in.proc_date 
+                AND MSG_NO       = :dfi0002f->in.msg_no 
+            ;
+    if (SYS_DB_CHK_FAIL){
+
+        if (SYS_DB_CHK_DUPKEY){
+            SYS_DBG("[c000]UPDATE DFJRN DUPKEY: msg_type[%s]", dfi0002f->in.msg_type);
+            return ERR_NONE;
+        }
+        db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        ex_syslog(LOG_FATAL, "[APPL_DM] %s DFJRN UPDATE %d "
+                             "[해결방안] 외화자금이체 담당자 call MSG[%s]"
+                             __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s DFJRN UPDATE %d "
+                             "[해결방안] 외화자금이체 담당자 call MSG[%s]"
+                             __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "DFJRN UPDATE ERROR");
+        return ERR_ERR;
+
+    }
+    SYS_TREF;
+
+    return ERR_NONE;
+    
 }
 /* ----------------------------------------------------------------------------------------------------------- */
 static int c100_df_jrn_canc(dfo0002f_ctx_t  *ctx, dfi0002f_t  *dfi0002f)
 {
 
     int                 rc = ERR_NONE;
+    SYS_TRSF;
+    SYS_DBG("c100_df_jrn_canc_upd #1 ======================================= ");
+    SYS_DBG("c100_df_jrn_canc_upd : proc_date[%s]", dfi0002f->in.proc_date    );
+    SYS_DBG("c100_df_jrn_canc_upd : msg_no   [%s]", dfi0002f->in.msg_no       );
+    SYS_DBG("c100_df_jrn_canc_upd #2 ======================================= ");
+    SYS_DBG("c100_df_jrn_canc_upd :      rspn_code[%s]", dfi0002f->in.rspn_code);
+    SYS_DBG("c100_df_jrn_canc_upd :canc_rspn_code [%s]", dfi0002f->in.canc_rspn_code);
+    SYS_DBG("c100_df_jrn_canc_upd :  canc_trace_no[%s]", dfi0002f->in.canc_trace_no );
+    SYS_DBG("c100_df_jrn_canc_upd :        corr_id[%s]", dfi0002f->in.corr_id      );
+
+    /*-------------------------------------------------------------------*/
+    /* DFJRN UPDATE  취소거래요청                                           */
+    /*-------------------------------------------------------------------*/
+    EXEC SQL UPDATE DFJRN 
+                SET CANC_TYPE       = '1'
+                  , CANC_RSPN_CODE  = :dfi0002f->in.rspn_code                 
+                  , CANC_TRACE_NO   = :dfi0002f->in.trace_no 
+                  , CORR_ID         = :dfi0002f->in.corr_id
+              WHERE PROC_DATE    = :dfi0002f->in.proc_date 
+                AND MSG_NO       = :dfi0002f->in.msg_no 
+            ;
+    if (SYS_DB_CHK_FAIL){
+
+        if (SYS_DB_CHK_DUPKEY){
+            SYS_DBG("[c100]UPDATE DFJRN DUPKEY: msg_type[%s]", dfi0002f->in.msg_type);
+            return ERR_NONE;
+        }
+        db_sql_error(SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        ex_syslog(LOG_FATAL, "[APPL_DM] %s DFJRN CANC UPDATE %d "
+                             "[해결방안] 외화자금이체 담당자 call MSG[%s]"
+                             __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s DFJRN CANC UPDATE %d "
+                             "[해결방안] 외화자금이체 담당자 call MSG[%s]"
+                             __FILE__, SYS_DB_ERRORNUM, SYS_DB_ERRORSTR);
+        SYS_HSTERR(SYS_NN, SYS_GENERR, "DFJRN CANC UPDATE ERROR");
+        return ERR_ERR;
+
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
 }
+/* ---------------------------------------- PROGRAM   END ---------------------------------------------------- */
