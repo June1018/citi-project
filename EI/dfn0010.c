@@ -215,10 +215,130 @@ static int b100_init_proc(dfn0010_ctx_t *ctx)
 }
 /* ----------------------------------------------------------------------------------------------------------- */
 static int b200_routing_proc(dfn0010_ctx_t *ctx)
+{
+    int                 rc = ERR_NONE;
+    dfi0003f_t          dfi0003f;
+
+    SYS_TRSF;
+
+    memset(&dfi0003f, 0x00, sizeof(dfi0003f_t));
+
+    utodate1(ctx->proc_date);
+    memcpy(dfi0003f.in.proc_date       , ctx->proc_date     , LEN_DFI0003F_PROC_DATE    );
+    memcpy(dfi0003f.in.msg_type        , ctx->msg_type      , LEN_DFI0003F_MSG_TYPE     );
+    memcpy(dfi0003f.in.proc_code       , ctx->proc_code     , LEN_DFI0003F_PROC_CODE    );
+    memcpy(dfi0003f.in.msg_no          , ctx->msg_no        , LEN_DFI0003F_MSG_NO       );
+    memcpy(dfi0003f.in.brn_no          , ctx->proc_date     , LEN_DFI0003F_BRN_NO       );
+    memcpy(dfi0003f.in.trace_no        , ctx->trace_no      , LEN_DFI0003F_TRACE_NO     );
+    memcpy(dfi0003f.in.acct_tran_code  , ctx->acct_tran_code, LEN_DFI0003F_ACCT_TRAN_CODE);
+    memcpy(&dfi0003f.in.ext_send_data  , EXTRECVDATA , sysocbgs(ctx->cb, IDX_EXTRECVDATA)); /* 대외수신 데이터 set  */
+
+    dfi0003f.in.exmqmsg11000 = (exmsg11000_t *) EXMSG11000;
+
+    rc = df_route_proc(&dfi0003f);
+    if (rc == ERR_ERR){
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s b200_routing_proc ERROR ", __FILE__);
+        return ERR_ERR;
+    }
+    /* -------------------------------------------------------------------------------------------------- */
+    SYS_DBG("df_route_proc dfi0003f.out.kti_flag[%s]rcv_acct_no[%s]currency[%s]", dfi0003f.out.kti_flag, dfi0003f.out.rcv_acct_no, dfi0003f.out.currency);
+    /* -------------------------------------------------------------------------------------------------- */
+    memcpy(ctx->kti_flag    , dfi0003f.out.kti_flag     , LEN_DFI0003F_KTI_FLAG);
+    memcpy(ctx->rcv_acct_no , dfi0003f.out.rcv_acct_no  , LEN_DFI0003F_ACCT_NO );   //수취계좌번호 
+    memcpy(ctx->currency    , dfi0003f.out.currency     , LEN_DFI0003F_CURRENCY);   //거래통화 
+
+    SYS_TREF;
+
+    return ERR_NONE;
+}
 /* ----------------------------------------------------------------------------------------------------------- */
 static int b300_tran_code_conv(dfn0010_ctx_t *ctx)
+{
+    int                 rc = ERR_NONE;
+    exi0251x_t          exi0251x;
+
+    SYS_TRSF;
+
+    memset(&exi0251x,   0x00, sizeof(exi0251x_t));
+
+    SYS_DBG("[b300]tran_code_conv:msg_type[%s]proc_code[%s]kti_flag[%s]", ctx->msg_type, ctx->proc_code, ctx->kti_flag);
+    /* ---------------------------------------  */
+    /* kti_flag(1): 7 else corebank : 8         */
+    if (ctx->kti_flag[0] == '1') {
+        exi0251x.in.tx_flag[0]  = '7';
+    }else{
+        exi0251x.in.tx_flag[0]  = '6';
+    }
+
+    exi0251x.in_conv_flag  = 'K';
+    memcpy(exi0251x.in.appl_code   , FCY_APPL_CODE , LEN_APPL_CODE);
+    memcpy(exi0251x.in.msg_type    , ctx->msg_type , LEN_MSG_TYPE );
+    memcpy(exi0251x.in.kftc_tx_code, ctx->proc_code, LEN_KFTC_TX_CODE);
+    exi0251x.in.msg_type_len      = 4;
+    exi0251x.in.kftc_tx_code_len  = 6;
+    exi0251x.in.ext_recv_data     = EXTRECVDATA;    /* 대외수신데이터  set   */
+
+    rc = ex_tran_code_convrt(&exi0251x);
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s b300_tran_code_conv(): "
+                             "거래코드 변환 ERROR : tx_code[%s] kftc_tx_code[%s]"
+                             "code/msgp[%d][%s]",
+                             __FILE__, ctx->msg_type, ctx->kftc_tx_code,
+                             sys_error_code(), sys_error_msg());
+        return ERR_ERR;
+    }
+    SYS_DBG("c000_tran_code_conv :tx_code[%s]tx_name[%s]", exi0251x.out.tx_code, utotrim(exi0251x.out.tx_name));
+    memcpy(ctx->host_tx_code,   exi0251x.out.tx_code, LEN_DFI0003F_TX_CODE  );
+    memcpy(EXMSG11000->tx_code, ctx->host_tx_code   , LEN_EXMSG11000_TX_CODE);
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
 /* ----------------------------------------------------------------------------------------------------------- */
 static int d000_jrn_insert(dfn0010_ctx_t *ctx)
+{
+    int                 rc = ERR_NONE;
+    dfi0002f_t          dfi0002f;
+
+    SYS_TRSF;
+
+    memset(&dfi0002f, 0x00, sizeof(dfi0002f_t));
+
+    utocick(ctx->corr_id);
+    dfi0002f.in.exmsg11000 = EXMSG11000;
+
+    memcpy(dfi0002f.in.proc_date        , ctx->proc_date    , LEN_DFI0002F_PROC_DATE );     /* 거래발생일자     */
+    memcpy(dfi0002f.in.tx_code          , ctx->tx_code      , LEN_DFI0002F_TX_CODE   );     /* tx_code       */
+    memcpy(dfi0002f.in.msg_type         , ctx->msg_type     , LEN_DFI0002F_MSG_TYPE  );     /* msg_type      */
+    memcpy(dfi0002f.in.proc_code        , ctx->proc_code    , LEN_DFI0002F_PROC_CODE );     /* 거래구분코드     */
+    memcpy(dfi0002f.in.trace_no         , ctx->trace_no     , LEN_DFI0002F_TRACE_NO  );     /* 전문추적번호     */
+    memcpy(dfi0002f.in.msg_no           , ctx->msg_no       , LEN_DFI0002F_MSG_NO    );     /* 거래고유번호     */
+    memcpy(dfi0002f.in.corr_id          , ctx->corr_id      , LEN_DFI0002F_CORR_ID   );     /* corr_id       */
+    dfi0002f.in.io_flag[0]  = ctx->io_flag;
+    dfi0002f.in.kti_flag[0] = ctx->kti_flag[0];
+
+    if (memcmp(ctx->msg_type, "0400", LEN_DFI0002F_MSG_TYPE) ==0 ||
+        memcmp(ctx->msg_type, "0410", LEN_DFI0002F_MSG_TYPE) ==0 ) {
+        memcpy(dfi0002f.in.canc_rspn_code  ,  ctx->rspn_code    , LEN_DFI0002F_RSPN_CODE );
+        memcpy(dfi0002f.in.canc_trace_no   ,  ctx->trace_no     , LEN_DFI0002F_TRACE_NO  );
+        dfi0002f.in.canc_type[0] = '1';
+    }else{
+        memcpy(dfi0002f.in.rspn_code       ,  ctx->rspn_code    , LEN_DFI0002F_RSPN_CODE );
+    }
+
+    rc = df_jrn_insupd(&dfi0002f);
+    if (rc == ERR_ERR) {
+        ex_syslog(LOG_ERROR, "[APPL_DM] %s d000_jrn_insert ", __FILE__ );
+        return ERR_ERR;
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
+
+}
 /* ----------------------------------------------------------------------------------------------------------- */
 static int k000_host_msg_send(dfn0010_ctx_t *ctx)
 /* ----------------------------------------------------------------------------------------------------------- */
