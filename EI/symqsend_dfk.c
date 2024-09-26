@@ -421,43 +421,48 @@ static int   e100_get_sendmsg(symqsend_dfk_ctx_t   *ctx)
     memcpy(MQMSG->appl_code, g_appl_code,    LEN_EXMQMSG_001_APPL_CODE);
     memcpy(MQMSG->corr_id,  ((hcmihead_t *)TCPHEAD)->queue_name,  LEN_HCMIHEAD_QUEUE_NAME);
     utocick(MQMSG->msg_id);
-
+    MQMSG->io_type = 1; // PUT
 
     /* TCPHEAD 부 data length set */
-    //sprintf(tmp_len, "%.*s", LEN_HCMIHEAD_DATA_LEN, ((hcmihead_t)TCPHEAD)->data_len);
-    //len = atoi(tmp_len);
-
     len = sysocbgs(ctx->cb, IDX_HOSTSENDDATA);    
     SYS_DBG("# data len length [%d]", len);
 
-    MQMSG->mqlen = len + LEN_HCMIHEAD = LEN_EIERRHEAD;
+    memcpy(ctx->tx_code, ((hcmihead_t *)TCPHEAD)->tx_code, LEN_HCMIHEAD_TX_CODE);
 
-    //g_len =sysocbgs(ctx->cb, IDX_HOSTSENDDATA);
-    //SYS_DBG("#2 get full data len length [%d]", g_len);
+    /* 7328003000 온라인 일괄전송 , 7231005100 관리전문 */
+    if (memcmp(ctx->tx_code, "7238003000", LEN_HCMIHEAD_TX_CODE) == 0 ||
+        memcmp(ctx->tx_code, "7231005100", LEN_HCMIHEAD_TX_CODE) == 0 ) {
+        SYS_DBG("#1 ESISTRT2[0800/일괄전송]tx_code[%s]", ctx->tx_code  );
+        memset(tmp_len, 0x00, sizeof(tmp_len));
+        len2 = LEN_EIERRHEAD + len; 
+        sprintf(tmp_len, "%05d", len);
 
-    /* TCP_HEADER Length set  */
-    memset(tmp_len, 0x20, sizeof(tmp_len));
-    sprintf(tmp_len, "%05d", len + LEN_EIERRHEAD);
-    SYS_DBG("#2 data len length[%d]", tmp_len);
+        memcpy(((hcmihead_t *)TCPHEAD)->data_len, tmp_len, LEN_HCMIHEAD_DATA_LEN);
+        MQMSG->mqlen = LEN_HCMIHEAD + len2;
+        SYS_DBG("#1 ESISTRT2[0800/일괄전송]HCMIHEAD.data_len [%s]", tmp_len);
+        SYS_DBG("#1 ESISTRT2[0800/일괄전송]MQMSG->mqlen [%d]", MQMSG->mqlen);
+    }else{
+        SYS_DBG("#2 ESISTRT1[ONLINE ]tx_code[%s]", ctx->tx_code  );
+        memset(tmp_len2,    0x00, sizeof(tmp_len2));
+        sprintf(tmp_len2, "%05d", len);
 
-    memcpy(((hcmihead_t *)TCPHEAD)->data_len, tmp_len, LEN_HCMIHEAD_DATA_LEN);
+        memcpy(((hcmihead_t *)TCPHEAD)->data_len, tmp_len2, LEN_HCMIHEAD_DATA_LEN);
+        MQMSG->mqlen = LEN_HCMIHEAD + len;
+        SYS_DBG("#2 ESISTRT1[ONLINE ]HCMIHEAD.data_len [%s]", tmp_len2);
+        SYS_DBG("2 ESISTRT1[ONLINE  ]MQMSG->mqlen [%d]", MQMSG->mqlen);
 
-    /* HOSTSEND DATA pointer get    */
-    cp = sysocbgp(ctx->cb, IDX_HOSTSENDDATA);
-    if (cp == NULL) {
-        SYS_DBG("HOSTSENDDATA is NULL");
+    }
+
+    /* -------------------------------- */
+    PRINT_HCMIHEAD((hcmihead_t *)hp);
+    /* -------------------------------- */
+    /* HOSTSEND DATA pointer get        */
+    cp = sysocbgp(ctx->cb,  IDX_HOSTSENDDATA);
+    if (cp == NULL){
+        SYS_DBG("HOSTSENDDATA is null ");
         return ERR_ERR;
     }
 
-    /* EXTRECV DATA Pointer get  */
-    ep = sysocbgp(ctx->cb, IDX_EXTRECVDATA);
-    if (ep == NULL){
-        SYS_DBG("EXTRECVDATA is NULL");
-        return ERR_ERR;
-    }
-
-    g_len = sysocbgs(ctx->cb, IDX_EXTRECVDATA);
-    SYS_DBG("#3 data len length[%d]", g_len);
 
     memcpy(eierrhead.err_code, "0000000", LEN_EIERRHEAD_ERR_CODE);
 #if 0
@@ -465,14 +470,13 @@ static int   e100_get_sendmsg(symqsend_dfk_ctx_t   *ctx)
 #else 
     memcpy(MQMSG->mqmsg, hp, LEN_HCMIHEAD);
     memcpy(&MQMSG->mqmsg[LEN_HCMIHEAD], &eierrhead, LEN_EIERRHEAD);
-    memcpy(&MQMSG->mqmsg[LEN_HCMIHEAD+LEN_EIERRHEAD], cp , len);
+    memcpy(&MQMSG->mqmsg[LEN_HCMIHEAD+LEN_EIERRHEAD], cp , MQMSG->mqlen);
 #endif    
     
     /* -------------------------------- */
-    PRINT_EXMQMSG(&MQMSG);
+    //PRINT_EXMQMSG(&MQMSG);
     /* -------------------------------- */
 
-    
     //MQPUT
     if (f100_put_mqmsg(ctx) == ERR_ERR){
         SYS_DBG("CALL f100_put_mqmsg !!!!!!!!");
@@ -480,7 +484,11 @@ static int   e100_get_sendmsg(symqsend_dfk_ctx_t   *ctx)
     }
 
     memset(&mqimsg001, 0x00, sizeof(mqimsg001_t));
+    memset(MQMSG->mqmsg, 0x00, sizeof(MQMSG->mqmsg));
+    memcpy(MQMSG->mqmsg, cp, MQMSG->mqlen);
+    SYS_DBG("#4 MQMSG->mqmsg[%d][%s]", MQMSG->mqlen, MQMSG->mqmsg);
     mqimg001.in.mqmsg_001 = MQMSG;
+
     memcpy(mqimg001.in.job_proc_type, "4" , LEN_MQIMG001_PROC_TYPE);
     rc = mqomsg001(&mqimg001);
     if (rc == ERR_ERR){
@@ -517,6 +525,7 @@ static int   f100_put_mqmsg(symqsend_dfk_ctx_t *ctx)
     memcpy(mqinfo.msg_id,       MQMSG->msg_id,  LEN_EXMQMSG_001_MSG_ID);
     memcpy(mqinfo.corrid,       MQMSG->corr_id,  strlen(MQMSG->corr_id));
     memcpy(mqinfo.msgbuf,       MQMSG->mqmsg,    MQMSG->mqlen);
+    mqinfo.msglen = MQMSG->mqlen;
     
     if (MQMSG->mqlen < sizeof(MQMSG->mqlen)) {
         SYS_DBG("MQMSG TEST FAIL !!!");
