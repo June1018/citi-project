@@ -75,7 +75,6 @@ static int a000_data_receive(dfn0020_ctx_t  *ctx, commbuff_t  *commbuff);
 static int b000_init_proc(dfn0020_ctx_t *ctx);
 static int c000_sel_orig_msg_proc(dfn0020_ctx_t *ctx);
 static int e000_exparmkti_load(dfn0020_ctx_t *ctx);
-static int f000_host_msg_format_proc(dfn0020_ctx_t *ctx);
 static int h000_host_msg_send(dfn0020_ctx_t *ctx);
 static int k100_kti_msg_send(dfn0020_ctx_t *ctx);
 static int m000_upd_jrn_proc(dfn0020_ctx_t *ctx);
@@ -353,23 +352,6 @@ static int e000_exparmkti_load(dfn0020_ctx_t *ctx)
     SYS_TREF;
 
     return ERR_NONE;
-
-}
-
-/* ----------------------------------------------------------------------------------------------------------- */
-static int f000_host_msg_format_proc(dfn0020_ctx_t *ctx)
-{
-
-    int                 rc  = ERR_NONE;
-    int                 len = 0;
-    char                corr_id[LEN_HCMIHEAD_QUEUE_NAME + 1];
-
-    hcmihead_t          hcmihead;
-
-    SYS_TREF;
-
-    return ERR_NONE;
-
 
 }
 
