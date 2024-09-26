@@ -366,59 +366,6 @@ static int f000_host_msg_format_proc(dfn0020_ctx_t *ctx)
 
     hcmihead_t          hcmihead;
 
-    /* init hcmihead    */
-    memset(corr_id, 0x00, sizeof(corr_id));
-
-    utocick(corr_id);
-
-    memcpy(ctx->corr_id, corr_id, LEN_HCMIHEAD_QUEUE_NAME);
-    memset(&hcmihead,   0x20, sizeof(hcmihead_t));
-    /* set hcmihead     */
-    memcpy(hcmihead.queue_name, ctx->corr_id       , LEN_HCMIHEAD_QUEUE_NAME);
-    memcpy(hcmihead.tx_code   , ctx->host_tx_code  , LEN_HCMIHEAD_TX_CODE   );
-    memcpy(hcmihead.data_len  , EXMSG11000->detl_rec_size, LEN_HCMIHEAD_DATA_LEN);
-    memcpy(hcmihead.resp_code , "000"              , LEN_HCMIHEAD_RESP_CODE );
-
-    ctx->recv_len = utoa2in(EXMSG11000->detl_rec_size, LEN_HCMIHEAD_DATA_LEN);
-
-    rc = sysocbsi(ctx->cb, IDX_TCPHEAD, &hcmihead, sizeof(hcmihead_t));
-    rc = sysocbsi(ctx->cb, IDX_HOSTSENDDATA, EXMSG11000->detl_area, ctx->recv_len);
-    if (rc == ERR_ERR){
-        SYS_HSTERR(SYS_LN, SYS_GENERR, "COMMBUFF SET ERR");
-        return ERR_ERR;
-    }
-
-    SYSGWINFO->time_val     = SYSGWINFO_SAF_DFLT_TIMEOUT;
-    SYSGWINFO->msg_type     = SYSGWINFO_MSG_1500;
-    SYSGWINFO->call_type    = SYSGWINFO_CALL_TYPE_IR;
-    SYSGWINFO->rspn_flag    = SYSGWINFO_SVC_REPLY;    
-
-    /* Forex MQ MSG SEND    */
-    rc - sys_tpcall("SYMQSEND_DFF", ctx->cb, TPNOTRAN);
-    if ( rc == ERR_ERR){
-        ex_syslog(LOG_FATAL, "[APPL_DM] %.7s dfn0010(FOREX21)- MQ MSG SEND ERROR %d [해결방안]HOST G/W 담당자 call",
-                            __FILE__, tperrno);
-        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s dfn0010(FOREX21)- k000_host_msg_send ERROR %d [해결방안]HOST G/W 담당자 call",
-                            __FILE__, tperrno);
-        if (ctx->mgr_flag[0] == '1'){
-            /* 관리전문 KTI tx_code get하기위해서 kti_flag set      */
-            memset(ctx->kti_flag, 0x00, sizeof(ctx->kti_flag));
-            ctx->kti_flag[0] = '1';
-            SYS_DBG("[k000]mgr_flag[%s]kti_flag[%s]",ctx->mgr_flag, ctx->kti_flag);
-            //return ERR_ERR;   20240715 요청사항 관리전문 Forex21/KTI 한쪽 gw문제가 생겨도 다른쪽에 영향없어야 한다. 
-        }else{
-            return ERR_ERR;
-        }
-    }
-    rc = z100_log_insert(ctx, (char *)EXTRECVDATA, sysocbgs(ctx->cb, IDX_EXTRECVDATA), 'I', '2');   /* 개설요청 :I sr_flag: 2[EI->PP]   */
-
-    if (ctx->mgr_flag[0] == '1'){
-        /* 관리전문 KTI(tx_code) set :mgr_flag[%s]ctx->kti_flag[%s]*/
-        memset(ctx->kti_flag,   0x00, sizeof(ctx->kti_flag));
-        ctx->kti_flag[0] = '1';
-        SYS_DBG("관리전문 KTI(tx_code) set :mgr_flag[%s]ctx->kti_flag[%s]", ctx->mgr_flag, ctx->kti_flag);
-    }
-
     SYS_TREF;
 
     return ERR_NONE;
@@ -431,32 +378,28 @@ static int h000_host_msg_send(dfn0020_ctx_t *ctx)
 {
 
     int                 rc  = ERR_NONE;
-    int                 len = 0;
-    char                corr_id[LEN_HCMIHEAD_QUEUE_NAME + 1];
-
     hcmihead_t          hcmihead;
 
     /* init hcmihead    */
-    memset(corr_id, 0x00, sizeof(corr_id));
-
-    utocick(corr_id);
-
-    memcpy(ctx->corr_id, corr_id, LEN_HCMIHEAD_QUEUE_NAME);
     memset(&hcmihead,   0x20, sizeof(hcmihead_t));
     /* set hcmihead     */
     memcpy(hcmihead.queue_name, ctx->corr_id       , LEN_HCMIHEAD_QUEUE_NAME);
     memcpy(hcmihead.tx_code   , ctx->host_tx_code  , LEN_HCMIHEAD_TX_CODE   );
     memcpy(hcmihead.data_len  , EXMSG11000->detl_rec_size, LEN_HCMIHEAD_DATA_LEN);
     memcpy(hcmihead.resp_code , "000"              , LEN_HCMIHEAD_RESP_CODE );
+#ifdef   _DEBUG
+    //PRINT_HCMIHEAD(&hcmihead);
+#endif
 
-    ctx->recv_len = utoa2in(EXMSG11000->detl_rec_size, LEN_HCMIHEAD_DATA_LEN);
-
+    /* set tcp head */
     rc = sysocbsi(ctx->cb, IDX_TCPHEAD, &hcmihead, sizeof(hcmihead_t));
-    rc = sysocbsi(ctx->cb, IDX_HOSTSENDDATA, EXMSG11000->detl_area, ctx->recv_len);
+    ctx->recv_len = utoa2in(EXMSG11000->detl_rec_size, LEN_HCMIHEAD_DATA_LEN);    
+    rc = sysocbsi(ctx->cb, IDX_HOSTSENDDATA, EXMSG11000->detl_area, ctx->recv_len + LEN_HCMIHEAD);
     if (rc == ERR_ERR){
         SYS_HSTERR(SYS_LN, SYS_GENERR, "COMMBUFF SET ERR");
         return ERR_ERR;
     }
+     SYS_DBG("[Forex] HOSTSENDDATA [%d][%.*s]", sysocbgs(ctx->cb, IDX_HOSTSENDDATA), sysocbgs(ctx->cb, IDX_HOSTSENDDATA), EXMSG11000->detl_area);
 
     SYSGWINFO->time_val     = SYSGWINFO_SAF_DFLT_TIMEOUT;
     SYSGWINFO->msg_type     = SYSGWINFO_MSG_1500;
@@ -466,28 +409,15 @@ static int h000_host_msg_send(dfn0020_ctx_t *ctx)
     /* Forex MQ MSG SEND    */
     rc - sys_tpcall("SYMQSEND_DFF", ctx->cb, TPNOTRAN);
     if ( rc == ERR_ERR){
-        ex_syslog(LOG_FATAL, "[APPL_DM] %.7s dfn0010(FOREX21)- MQ MSG SEND ERROR %d [해결방안]HOST G/W 담당자 call",
+        ex_syslog(LOG_FATAL, "[APPL_DM] %.7s dfn0020(FOREX21)- MQ MSG SEND ERROR %d [해결방안]HOST G/W 담당자 call",
                             __FILE__, tperrno);
-        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s dfn0010(FOREX21)- k000_host_msg_send ERROR %d [해결방안]HOST G/W 담당자 call",
+        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s dfn0020(FOREX21)- k000_host_msg_send ERROR %d [해결방안]HOST G/W 담당자 call",
                             __FILE__, tperrno);
-        if (ctx->mgr_flag[0] == '1'){
-            /* 관리전문 KTI tx_code get하기위해서 kti_flag set      */
-            memset(ctx->kti_flag, 0x00, sizeof(ctx->kti_flag));
-            ctx->kti_flag[0] = '1';
-            SYS_DBG("[k000]mgr_flag[%s]kti_flag[%s]",ctx->mgr_flag, ctx->kti_flag);
-            //return ERR_ERR;   20240715 요청사항 관리전문 Forex21/KTI 한쪽 gw문제가 생겨도 다른쪽에 영향없어야 한다. 
-        }else{
-            return ERR_ERR;
-        }
+        //return ERR_ERR;
     }
-    rc = z100_log_insert(ctx, (char *)EXTRECVDATA, sysocbgs(ctx->cb, IDX_EXTRECVDATA), 'I', '2');   /* 개설요청 :I sr_flag: 2[EI->PP]   */
 
-    if (ctx->mgr_flag[0] == '1'){
-        /* 관리전문 KTI(tx_code) set :mgr_flag[%s]ctx->kti_flag[%s]*/
-        memset(ctx->kti_flag,   0x00, sizeof(ctx->kti_flag));
-        ctx->kti_flag[0] = '1';
-        SYS_DBG("관리전문 KTI(tx_code) set :mgr_flag[%s]ctx->kti_flag[%s]", ctx->mgr_flag, ctx->kti_flag);
-    }
+    rc = z100_log_insert(ctx, (char *)EXTRECVDATA, sysocbgs(ctx->cb, IDX_EXTRECVDATA), 'O', '4');   /* 취급응답 :O sr_flag: 4[EI->PP]   */
+ 
 
     SYS_TREF;
 
@@ -504,7 +434,6 @@ static int k100_kti_msg_send(dfn0020_ctx_t *ctx)
     char                data_len[LEN_HCMIHEAD_DATA_LEN];
     int                 len, len2;
     hcmihead_t          hcmihead;
-    eierrhead_t         eierrhead;
     dfi0001x_t          dfi0001x;
 
     memset(&dfi0001x,   0x20, sizeof(dfi0001x_t));
@@ -512,36 +441,29 @@ static int k100_kti_msg_send(dfn0020_ctx_t *ctx)
     df_proc_exmsg11000_init(&dfi0001x);
 
     /* init hcmihead    */
-    memset(corr_id, 0x00, sizeof(corr_id));
-    utocick(corr_id);
-    memset(ctx->corr_id, 0x00, sizeof(corr_id));
     /* set hcmihead     */
     memset(&hcmihead,    0x20, sizeof(hcmihead_t));
     memcpy(hcmihead.queue_name, ctx->corr_id      , LEN_HCMIHEAD_QUEUE_NAME);
-
     memcpy(hcmihead.tx_code   , ctx->host_tx_code , LEN_HCMIHEAD_TX_CODE   );
-    memcpy(EXMSG10000->tx_code, ctx->host_tx_code , LEN_HCMIHEAD_TX_CODE   );
 
-    //len = LEN_HCMIHEAD + LEN_EIERRHEAD + ctx->recv_len;
-    len = LEN_HCMIHEAD + ctx->recv_len;
-    memset(data_len, 0x20, sizeof(data_len));
-    sprintf(data_len, "%05d",   len);
-    utotrim(data_len);
-    SYS_DBG("k100_kti_msg_send #1 data_len[%s]recv_len[%d]", data_len, ctx->recv_len );
-
-    memcpy(hcmihead.data_len,   data_len , LEN_HCMIHEAD_DATA_LEN );
+    memcpy(hcmihead.data_len  , EXMSG11000->detl_rec_size , LEN_HCMIHEAD_DATA_LEN );
+    memcpy(hcmihead.resp_code , "000" , LEN_HCMIHEAD_RESP_CODE );
 
 #ifdef  _DEBUG
     //PRINT_HCMIHEAD(&hcmihead);
 #endif
-    SYS_DBG("EXMSG11000[KTI][%d][%s]",  sysocbgs(ctx->cb, IDX_HOSTSENDDATA), EXMSG11000);
+
+    ctx->recv_len = utoa2in(exmqmsg11000->detl_rec_size, LEN_HCMIHEAD_DATA_LEN);
+    memcpy(dfi0001x.in.exmsg11000->detl_area, EXMSG11000->detl_area, ctx->recv_len );
 
     rc = sysocbsi(ctx->cb, IDX_TCPHEAD, &hcmihead, sizeof(hcmihead_t));
-    rc = sysocbsi(ctx->cb, IDX_HOSTSENDDATA, EXMSG11000, len);
+    rc = sysocbsi(ctx->cb, IDX_HOSTSENDDATA, dfi0001x.in.exmqmsg11000, ctx->recv_len + LEN_KTIHEAD);
     if (rc == ERR_ERR){
         SYS_HSTERR(SYS_LN, SYS_GENERR, "COMMBUFF SET ERR");
         return ERR_ERR;
     }
+
+    SYS_DBG("[KTI]HOSTSENDDATA[%d][%.*s]",  sysocbgs(ctx->cb, IDX_HOSTSENDDATA), sysocbgs(ctx->cb, IDX_HOSTSENDDATA), HOSTSENDDATA);
 
     SYSGWINFO->time_val     = SYSGWINFO_SAF_DFLT_TIMEOUT;
     SYSGWINFO->msg_type     = SYSGWINFO_MSG_1500;
@@ -551,19 +473,14 @@ static int k100_kti_msg_send(dfn0020_ctx_t *ctx)
     /* KTI MQ MSG SEND    */
     rc - sys_tpcall("SYMQSEND_DFK", ctx->cb, TPNOTRAN);
     if ( rc == ERR_ERR){
-        ex_syslog(LOG_FATAL, "[APPL_DM] %.7s dfn0010(KTI)- MQ MSG SEND ERROR %d [해결방안]HOST G/W 담당자 call",
+        ex_syslog(LOG_FATAL, "[APPL_DM] %.7s dfn0020(KTI)- MQ MSG SEND ERROR %d [해결방안]HOST G/W 담당자 call",
                             __FILE__, tperrno);
-        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s dfn0010(KTI)- k100_kti_msg_send() ERROR %d [해결방안]HOST G/W 담당자 call",
+        ex_syslog(LOG_ERROR, "[APPL_DM] %.7s dfn0020(KTI)- k100_kti_msg_send() ERROR %d [해결방안]HOST G/W 담당자 call",
                             __FILE__, tperrno);
-
-        if (ctx->mgr_flag[0] == '1'){
-            SYS_DBG("[k100]mgr_flag[%s]",ctx->mgr_flag);
-            //return ERR_ERR;   20240715 요청사항 관리전문 Forex21/KTI 한쪽 gw문제가 생겨도 다른쪽에 영향없어야 한다. 
-        }else{
-            return ERR_ERR;
-        }
+        //return ERR_ERR;
     }
-    rc = z100_log_insert(ctx, (char *)EXTRECVDATA, sysocbgs(ctx->cb, IDX_EXTRECVDATA), 'I', '2');   /* 개설요청 :I sr_flag: 2[EI->PP]   */
+
+        rc = z100_log_insert(ctx, (char *)EXTRECVDATA, sysocbgs(ctx->cb, IDX_EXTRECVDATA), 'O', '4');   /* 취급응답 :O sr_flag: 4[EI->PP]   */
     
     SYS_TREF;
 
@@ -573,6 +490,60 @@ static int k100_kti_msg_send(dfn0020_ctx_t *ctx)
 /* ----------------------------------------------------------------------------------------------------------- */
 static int m000_upd_jrn_proc(dfn0020_ctx_t *ctx)
 {
+    int                 rc = ERR_NONE;
+    dfi0002f_t          dfi0002f;
+
+    SYS_TRSF;
+
+    memset(&dfi0002f, 0x00, sizeof(dfi0002f_t));
+    utodate1(ctx->proc_date);       //조회조건일자 
+    memcpy(dfi0002f.in.proc_date       ,  ctx->proc_date    , LEN_DFI0002F_PROC_DATE );
+    memcpy(dfi0002f.in.msg_no           , ctx->msg_no       , LEN_DFI0002F_MSG_NO    );     /* 거래고유번호     */
+    memcpy(dfi0002f.in.msg_type         , ctx->msg_type     , LEN_DFI0002F_MSG_TYPE  );     /* msg_type      */
+
+    memcpy(dfi0002f.in.tx_code          , ctx->tx_code      , LEN_DFI0002F_TX_CODE   );     /* tx_code       */    
+    memcpy(dfi0002f.in.proc_code        , ctx->proc_code    , LEN_DFI0002F_PROC_CODE );     /* 거래구분코드     */    
+    dfi0002f.in.io_flag[0]  = ctx->io_flag;
+    dfi0002f.in.kti_flag[0] = ctx->kti_flag[0];
+    /*---------------------------------------------------------------------------*/
+    SYS_DBG("m000_upd_jrn_proc: proc_date[%s]", dfi0002f.in.proc_date);
+    SYS_DBG("m000_upd_jrn_proc:    msg_no[%s]", dfi0002f.in.msg_no   );
+    SYS_DBG("m000_upd_jrn_proc:  msg_type[%s]", dfi0002f.in.msg_type );
+    SYS_DBG("m000_upd_jrn_proc:   tx_code[%s]", dfi0002f.in.tx_code  );
+    SYS_DBG("m000_upd_jrn_proc: proc_code[%s]", dfi0002f.in.proc_code  );
+    /*---------------------------------------------------------------------------*/
+
+    if (memcmp(ctx->msg_type, "0400", LEN_DFI0002F_MSG_TYPE) ==0 ||
+        memcmp(ctx->msg_type, "0410", LEN_DFI0002F_MSG_TYPE) ==0 ) {
+        memcpy(dfi0002f.in.canc_rspn_code  ,  ctx->rspn_code    , LEN_DFI0002F_RSPN_CODE );
+        memcpy(dfi0002f.in.canc_trace_no   ,  ctx->trace_no     , LEN_DFI0002F_TRACE_NO  );
+        dfi0002f.in.canc_type[0] = '1';
+        SYS_DBG("m000_upd_jrn_proc:   canc_rspn_code[%s]", dfi0002f.in.canc_rspn_code  );
+        SYS_DBG("m000_upd_jrn_proc:    canc_trace_no[%s]", dfi0002f.in.canc_trace_no   );
+
+        rc = df_jrn_canc_upd(&dfi0002f);
+        if (rc == ERR_ERR){
+            ex_syslog(LOG_FATAL, "[APPL_DM] %s m000_upd_jrn_proc() :", __FILE__);
+            return ERR_ERR;
+        }
+    }else{
+        memcpy(dfi0002f.in.trace_no         , ctx->trace_no     , LEN_DFI0002F_TRACE_NO  );     /* 전문추적번호     */
+        memcpy(dfi0002f.in.corr_id          , ctx->corr_id      , LEN_DFI0002F_CORR_ID   );     /* corr_id       */        
+        memcpy(dfi0002f.in.rspn_code       ,  ctx->rspn_code    , LEN_DFI0002F_RSPN_CODE );
+        SYS_DBG("m000_upd_jrn_proc:    trace_no[%s]", dfi0002f.in.trace_no   );
+        SYS_DBG("m000_upd_jrn_proc:     corr_id[%s]", dfi0002f.in.corr_id    );
+        SYS_DBG("m000_upd_jrn_proc:   rspn_code[%s]", dfi0002f.in.rspn_code  );
+
+        rc = df_jrn_upd(&dfi0002f);
+        if (rc == ERR_ERR) {
+            ex_syslog(LOG_FATAL, "[APPL_DM] %s m000_upd_jrn_proc() :", __FILE__);
+            return ERR_ERR;
+        }
+    }
+
+    SYS_TREF;
+
+    return ERR_NONE;
 
 }
 /* ----------------------------------------------------------------------------------------------------------- */
